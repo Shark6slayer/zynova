@@ -28,10 +28,13 @@ async def test_readiness_endpoint():
     assert response.status_code in [200, 503]
     data = response.json()
     assert "database" in data
+    assert "database_name" in data
     assert "status" in data
     if response.status_code == 200:
         assert data["status"] == "ready"
         assert data["database"] == "connected"
+        assert isinstance(data["database_name"], str)
+        assert len(data["database_name"]) > 0
     else:
         assert data["status"] == "not_ready"
         assert data["database"] in ["unavailable", "error"]
@@ -56,9 +59,63 @@ async def test_readiness_fails_503_when_db_offline(monkeypatch):
         data = response.json()
         assert data["status"] == "not_ready"
         assert data["database"] == "unavailable"
+        assert data["database_name"] is None
     finally:
         client.db_manager.db = original_db
         client.db_manager.client = original_client
+
+@pytest.mark.asyncio
+async def test_readiness_deterministic_mock_success(monkeypatch):
+    from app.database import client
+    from unittest.mock import AsyncMock
+
+    mock_db = AsyncMock()
+    mock_db.name = "zynova_db"
+    mock_db.command.return_value = {"ok": 1.0}
+
+    original_db = client.db_manager.db
+    try:
+        client.db_manager.db = mock_db
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.get("/api/v1/ready")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "ready"
+        assert data["database"] == "connected"
+        assert data["database_name"] == "zynova_db"
+        assert data["dependencies"]["mongodb"] == "connected"
+
+        # Verify no sensitive configuration or credentials leaked
+        text_payload = response.text.lower()
+        for forbidden in ["mongodb+srv://", "mongodb://", "password", "username", "cluster", "t53zapm"]:
+            assert forbidden not in text_payload, f"Sensitive term '{forbidden}' leaked in response!"
+    finally:
+        client.db_manager.db = original_db
+
+@pytest.mark.asyncio
+async def test_readiness_deterministic_mock_ping_failure(monkeypatch):
+    from app.database import client
+    from unittest.mock import AsyncMock
+
+    mock_db = AsyncMock()
+    mock_db.name = "zynova_db"
+    mock_db.command.side_effect = ConnectionError("Simulated ping timeout")
+
+    original_db = client.db_manager.db
+    try:
+        client.db_manager.db = mock_db
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.get("/api/v1/ready")
+
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "not_ready"
+        assert data["database"] == "error"
+        assert data["database_name"] is None
+        assert data["dependencies"]["mongodb"] == "error"
+    finally:
+        client.db_manager.db = original_db
 
 def test_password_hashing():
     raw_pass = "SovereignPass2026!"
