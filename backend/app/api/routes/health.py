@@ -27,10 +27,12 @@ async def readiness_check(response: Response):
         except Exception:
             pass
 
+    db_name = None
     if db is not None:
         try:
             await db.command("ping")
             mongo_status = "connected"
+            db_name = getattr(db, "name", None)
         except Exception:
             mongo_status = "error"
             
@@ -41,6 +43,7 @@ async def readiness_check(response: Response):
     return {
         "status": "ready" if is_ready else "not_ready",
         "database": mongo_status,
+        "database_name": db_name,
         "dependencies": {
             "mongodb": mongo_status
         }
