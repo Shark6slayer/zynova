@@ -15,6 +15,17 @@ async def init_phase13_db():
     auth_rate_limiter.requests.clear()
     shopping_order_rate_limiter.requests.clear()
     payment_rate_limiter.requests.clear()
+
+    # Seed isolated test shopping fixture if missing
+    from app.database.client import _seed_shopping_catalog
+    from app.core.config import settings
+    orig_env = settings.ENVIRONMENT
+    orig_allow = settings.ALLOW_DEMO_SEEDING
+    settings.ALLOW_DEMO_SEEDING = True
+    await _seed_shopping_catalog()
+    settings.ENVIRONMENT = orig_env
+    settings.ALLOW_DEMO_SEEDING = orig_allow
+
     yield
     db = get_database()
     if db is not None:

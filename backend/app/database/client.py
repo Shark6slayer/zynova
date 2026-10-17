@@ -150,10 +150,12 @@ async def _setup_indexes() -> None:
         await db_manager.db.payment_transactions.create_index([("idempotency_key", 1)], unique=True, sparse=True)
         await db_manager.db.payment_transactions.create_index([("transaction_ref", 1)], unique=True)
 
-        # Seed initial authentic restaurants and menus if empty
-        await _seed_food_catalog()
-        # Seed initial shopping products catalog if empty
-        await _seed_shopping_catalog()
+        # Startup demo seeding is strictly opt-in via ALLOW_DEMO_SEEDING (disabled by default in all environments)
+        if getattr(settings, "ALLOW_DEMO_SEEDING", False) and settings.ENVIRONMENT.lower() != "production":
+            await _seed_food_catalog()
+            await _seed_shopping_catalog()
+        else:
+            logger.info("Demo catalog seeding is disabled (ALLOW_DEMO_SEEDING=False).")
 
         logger.info("MongoDB collections and indexes verified.")
     except Exception as e:
@@ -183,7 +185,7 @@ async def _seed_food_catalog() -> None:
         logger.info("Skipping food catalog seeding: environment is production and ALLOW_DEMO_SEEDING is disabled.")
         return
 
-    count = await db_manager.db.restaurants.count_documents({})
+    count = await db_manager.db.restaurants.count_documents({"_id": {"$in": ["rest_01", "rest_02", "rest_03"]}})
     if count > 0:
         return
 
@@ -329,7 +331,7 @@ async def _seed_shopping_catalog() -> None:
         logger.info("Skipping shopping catalog seeding: environment is production and ALLOW_DEMO_SEEDING is disabled.")
         return
 
-    count = await db_manager.db.products.count_documents({})
+    count = await db_manager.db.products.count_documents({"_id": {"$in": ["prod_01", "prod_02", "prod_03", "prod_04", "prod_05", "prod_06"]}})
     if count > 0:
         return
 
