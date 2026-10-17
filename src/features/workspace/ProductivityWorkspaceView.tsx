@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Briefcase, CheckSquare, Calendar, FileText, Plus, 
   Trash2, CheckCircle2, Clock, Users 
 } from 'lucide-react';
+import { useAuth } from '../../context/AuthContext';
 
 interface Task {
   id: string;
@@ -13,34 +14,63 @@ interface Task {
 }
 
 export const ProductivityWorkspaceView: React.FC = () => {
-  const [tasks, setTasks] = useState<Task[]>([
-    { id: '1', title: 'Compile Indic NLP Tokenizer Benchmarks for Tamil & Telugu', completed: true, priority: 'High', due: 'Today' },
-    { id: '2', title: 'Review ONDC direct restaurant integration schema', completed: false, priority: 'High', due: 'Tomorrow' },
-    { id: '3', title: 'Prepare design system documentation for Mobile App release', completed: false, priority: 'Medium', due: '18 Oct' },
-  ]);
+  const { user } = useAuth();
+  const storageKey = user ? `super_ai_workspace_tasks_${user.id}` : 'super_ai_workspace_tasks_guest';
+
+  const [tasks, setTasks] = useState<Task[]>(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      return saved ? JSON.parse(saved) : [];
+    } catch {
+      return [];
+    }
+  });
+
+  // Switch tasks when user account changes or on login/logout
+  useEffect(() => {
+    try {
+      const saved = localStorage.getItem(storageKey);
+      setTasks(saved ? JSON.parse(saved) : []);
+    } catch {
+      setTasks([]);
+    }
+  }, [storageKey]);
 
   const [newTaskTitle, setNewTaskTitle] = useState('');
 
+  // Persist tasks locally for the current isolated user account
+  const updateTasks = (newTasks: Task[]) => {
+    setTasks(newTasks);
+    try {
+      localStorage.setItem(storageKey, JSON.stringify(newTasks));
+    } catch (e) {
+      console.warn('Failed to save workspace tasks to localStorage:', e);
+    }
+  };
+
   const toggleTask = (id: string) => {
-    setTasks((prev) =>
-      prev.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t))
-    );
+    const updated = tasks.map((t) => (t.id === id ? { ...t, completed: !t.completed } : t));
+    updateTasks(updated);
+  };
+
+  const deleteTask = (e: React.MouseEvent, id: string) => {
+    e.stopPropagation();
+    const updated = tasks.filter((t) => t.id !== id);
+    updateTasks(updated);
   };
 
   const handleAddTask = (e: React.FormEvent) => {
     e.preventDefault();
     if (!newTaskTitle.trim()) return;
 
-    setTasks([
-      ...tasks,
-      {
-        id: String(Date.now()),
-        title: newTaskTitle,
-        completed: false,
-        priority: 'Medium',
-        due: 'Today',
-      },
-    ]);
+    const newTask: Task = {
+      id: String(Date.now()),
+      title: newTaskTitle.trim(),
+      completed: false,
+      priority: 'Medium',
+      due: 'Today',
+    };
+    updateTasks([newTask, ...tasks]);
     setNewTaskTitle('');
   };
 
@@ -82,43 +112,59 @@ export const ProductivityWorkspaceView: React.FC = () => {
           <button
             type="submit"
             disabled={!newTaskTitle.trim()}
-            className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-xl text-xs font-semibold transition"
+            className="px-4 py-2.5 bg-violet-600 hover:bg-violet-500 disabled:opacity-40 text-white rounded-xl text-xs font-semibold transition flex items-center gap-1.5"
           >
+            <Plus className="w-3.5 h-3.5" />
             Add Task
           </button>
         </form>
 
         <div className="space-y-2 pt-2">
-          {tasks.map((task) => (
-            <div
-              key={task.id}
-              onClick={() => toggleTask(task.id)}
-              className="p-3.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/70 border border-white/5 cursor-pointer flex items-center justify-between text-xs transition"
-            >
-              <div className="flex items-center space-x-3">
-                <CheckCircle2
-                  className={`w-4 h-4 shrink-0 transition ${
-                    task.completed ? 'text-emerald-400' : 'text-slate-600'
-                  }`}
-                />
-                <span className={`font-medium ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
-                  {task.title}
-                </span>
-              </div>
-              <div className="flex items-center space-x-2 text-[10px]">
-                <span
-                  className={`px-2 py-0.5 rounded font-bold ${
-                    task.priority === 'High'
-                      ? 'bg-red-500/20 text-red-300'
-                      : 'bg-amber-500/20 text-amber-300'
-                  }`}
-                >
-                  {task.priority}
-                </span>
-                <span className="text-slate-400">{task.due}</span>
-              </div>
+          {tasks.length === 0 ? (
+            <div className="p-8 text-center rounded-xl bg-slate-800/20 border border-white/5 space-y-2">
+              <CheckSquare className="w-8 h-8 text-slate-600 mx-auto" />
+              <p className="text-xs text-slate-400 font-medium">No tasks yet</p>
+              <p className="text-[11px] text-slate-500">Add your first deliverable above to begin tracking your work.</p>
             </div>
-          ))}
+          ) : (
+            tasks.map((task) => (
+              <div
+                key={task.id}
+                onClick={() => toggleTask(task.id)}
+                className="p-3.5 rounded-xl bg-slate-800/40 hover:bg-slate-800/70 border border-white/5 cursor-pointer flex items-center justify-between text-xs transition group"
+              >
+                <div className="flex items-center space-x-3 flex-1 min-w-0 pr-3">
+                  <CheckCircle2
+                    className={`w-4 h-4 shrink-0 transition ${
+                      task.completed ? 'text-emerald-400' : 'text-slate-600'
+                    }`}
+                  />
+                  <span className={`font-medium truncate ${task.completed ? 'line-through text-slate-500' : 'text-slate-200'}`}>
+                    {task.title}
+                  </span>
+                </div>
+                <div className="flex items-center space-x-2 text-[10px] shrink-0">
+                  <span
+                    className={`px-2 py-0.5 rounded font-bold ${
+                      task.priority === 'High'
+                        ? 'bg-red-500/20 text-red-300'
+                        : 'bg-amber-500/20 text-amber-300'
+                    }`}
+                  >
+                    {task.priority}
+                  </span>
+                  <span className="text-slate-400">{task.due}</span>
+                  <button
+                    onClick={(e) => deleteTask(e, task.id)}
+                    className="p-1 rounded text-slate-500 hover:text-red-400 hover:bg-red-500/10 transition"
+                    title="Delete task"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))
+          )}
         </div>
       </div>
     </div>

@@ -24,19 +24,18 @@ export const AIAssistantView: React.FC = () => {
   const [activeTab, setActiveTab] = useState<'chat' | 'orchestration' | 'memory'>('chat');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
+  // Real backend LLM service is unconfigured in this deployment
+  const isAIEngineConfigured = false;
+
   const [messages, setMessages] = useState<Message[]>([
     {
-      id: 'msg_1',
+      id: 'msg_init',
       sender: 'assistant',
-      text: `Namaste Ananya! I am **SUPER_AI Universal Assistant**. \n\nI can seamlessly orchestrate tasks across your digital life: search the web, compose emails, plan itineraries in Tamil/Hindi/English, order from A2B or Meghana Foods, analyze financial spending, or write TypeScript code. \n\nHow can I empower your day today?`,
-      timestamp: '10:00 AM',
-      modelUsed: 'SUPER Multilingual (Indic-v2)',
+      text: `Namaste! I am the **SUPER_AI Universal Assistant** interface.\n\nNotice: Live AI language model service integration is currently unconfigured in this production deployment. You may inspect the interface, workflow topologies, and sovereign memory architectures below.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      modelUsed: 'System Notice',
     },
   ]);
-
-  // Orchestrator simulation state
-  const [orchestratorRunning, setOrchestratorRunning] = useState(false);
-  const [orchestratorStep, setOrchestratorStep] = useState(0);
 
   const handleSendMessage = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
@@ -50,46 +49,24 @@ export const AIAssistantView: React.FC = () => {
     };
 
     setMessages((prev) => [...prev, userMsg]);
-    const promptSnapshot = inputPrompt;
     setInputPrompt('');
-    setIsGenerating(true);
 
-    setTimeout(() => {
-      let reply = `Here is the comprehensive response from **${selectedModel}**:\n\n`;
-      if (promptSnapshot.toLowerCase().includes('food') || promptSnapshot.toLowerCase().includes('order')) {
-        reply += `I have inspected your food preferences. I found **A2B - Adyar Ananda Bhavan** (Rating 4.6, 22 mins away) with fresh Ghee Roast Dosa, or **Meghana Foods** for Andhra Biryani. Would you like me to prepare a cart for review?`;
-      } else if (promptSnapshot.toLowerCase().includes('code') || promptSnapshot.toLowerCase().includes('react')) {
-        reply += `Here is an optimized TypeScript hook for managing state with localStorage and auto-sync:\n\n\`\`\`typescript\nexport function useLocalStorage<T>(key: string, initial: T): [T, (val: T) => void] {\n  const [val, setVal] = useState<T>(() => JSON.parse(localStorage.getItem(key) || JSON.stringify(initial)));\n  return [val, (newVal) => { localStorage.setItem(key, JSON.stringify(newVal)); setVal(newVal); }];\n}\n\`\`\``;
-      } else {
-        reply += `I processed your request: "${promptSnapshot}".\n\nCross-referencing your personal workspace notes and Indian regional context, all insights have been aggregated with zero data leakage.`;
-      }
+    // Do not fabricate fake AI answers when the backend LLM service is not connected
+    const unavailableMsg: Message = {
+      id: 'ast_' + Date.now(),
+      sender: 'assistant',
+      text: `AI service unavailable: No active LLM provider or self-hosted model endpoint is connected to this deployment. Real-time inference cannot be performed.`,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+      modelUsed: selectedModel,
+    };
 
-      const assistantMsg: Message = {
-        id: 'ast_' + Date.now(),
-        sender: 'assistant',
-        text: reply,
-        timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        modelUsed: selectedModel,
-      };
-
-      setMessages((prev) => [...prev, assistantMsg]);
-      setIsGenerating(false);
-    }, 900);
+    setMessages((prev) => [...prev, unavailableMsg]);
   };
 
   const handleCopy = (id: string, text: string) => {
     navigator.clipboard?.writeText(text);
     setCopiedId(id);
     setTimeout(() => setCopiedId(null), 2000);
-  };
-
-  const startDemoOrchestration = () => {
-    setOrchestratorRunning(true);
-    setOrchestratorStep(1);
-
-    setTimeout(() => setOrchestratorStep(2), 1200);
-    setTimeout(() => setOrchestratorStep(3), 2400);
-    setTimeout(() => setOrchestratorStep(4), 3800);
   };
 
   return (
@@ -103,9 +80,15 @@ export const AIAssistantView: React.FC = () => {
           <div>
             <h1 className="font-semibold text-lg flex items-center gap-2">
               SUPER_AI Universal Copilot
-              <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-                ACTIVE
-              </span>
+              {isAIEngineConfigured ? (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  ACTIVE
+                </span>
+              ) : (
+                <span className="text-[10px] px-2 py-0.5 rounded-full font-mono bg-amber-500/20 text-amber-400 border border-amber-500/30">
+                  UNCONFIGURED
+                </span>
+              )}
             </h1>
             <p className="text-xs text-slate-400">Indic-First Multi-Engine Agentic Architecture</p>
           </div>
@@ -127,7 +110,7 @@ export const AIAssistantView: React.FC = () => {
               activeTab === 'orchestration' ? 'bg-violet-600 text-white shadow' : 'text-slate-400 hover:text-white'
             }`}
           >
-            <Layers className="w-3.5 h-3.5" /> Multi-Agent Workflow
+            <Layers className="w-3.5 h-3.5" /> Agent Workflows
           </button>
           <button
             onClick={() => setActiveTab('memory')}
@@ -311,102 +294,65 @@ export const AIAssistantView: React.FC = () => {
               Autonomous Cross-Module Task Orchestration
             </h2>
             <p className="text-sm text-slate-400">
-              SUPER_AI coordinates sub-agents across Dining, UPI Payments, Calendar, and Messaging while maintaining human-in-the-loop authorization for consequential transactions.
+              SUPER_AI coordinates sub-agents across Dining, UPI Payments, Calendar, and Messaging with strict human-in-the-loop authorization boundaries.
             </p>
           </div>
 
           <div className="p-4 rounded-xl bg-black/30 border border-white/10 flex flex-col md:flex-row items-center justify-between gap-4">
             <div>
-              <span className="text-xs uppercase tracking-wider text-violet-400 font-semibold">Simulated Workflow</span>
+              <span className="text-xs uppercase tracking-wider text-amber-400 font-semibold">Service Status</span>
               <p className="text-sm font-medium text-white">
-                "Find dinner for 4 in Indiranagar, verify table availability, reserve, and notify the team chat."
+                Multi-agent orchestration requires a connected backend LLM runtime.
               </p>
             </div>
-            <button
-              onClick={startDemoOrchestration}
-              disabled={orchestratorRunning && orchestratorStep < 4}
-              className="px-4 py-2 rounded-xl bg-violet-600 hover:bg-violet-500 text-white font-medium text-sm transition shadow-md shrink-0 flex items-center gap-2"
-            >
-              <RefreshCw className={`w-4 h-4 ${orchestratorRunning && orchestratorStep < 4 ? 'animate-spin' : ''}`} />
-              {orchestratorRunning && orchestratorStep < 4 ? 'Executing...' : 'Run Simulated Workflow'}
-            </button>
+            <div className="px-3 py-1.5 rounded-lg bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-mono">
+              ENGINE DISCONNECTED
+            </div>
           </div>
 
           {/* Stepper Timeline */}
           <div className="space-y-4 max-w-2xl">
-            <div className={`p-4 rounded-xl border transition-all ${
-              orchestratorStep >= 1 ? 'border-violet-500/40 bg-violet-950/20' : 'border-white/5 bg-slate-900/30 opacity-50'
-            }`}>
+            <div className="p-4 rounded-xl border border-white/5 bg-slate-900/30 opacity-70">
               <div className="flex items-center space-x-3">
-                {orchestratorStep > 1 ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                ) : orchestratorStep === 1 ? (
-                  <RefreshCw className="w-5 h-5 text-violet-400 animate-spin" />
-                ) : (
-                  <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">1</div>
-                )}
+                <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">1</div>
                 <div>
-                  <h4 className="text-sm font-semibold text-white">Step 1: Restaurant Discovery & Menu Aggregation</h4>
-                  <p className="text-xs text-slate-400">Sub-agent queries Indiranagar food delivery & dining database.</p>
+                  <h4 className="text-sm font-semibold text-white">Discovery & Intent Parsing</h4>
+                  <p className="text-xs text-slate-400">Sub-agents parse user prompt and extract entities, locations, and actions.</p>
                 </div>
               </div>
             </div>
 
-            <div className={`p-4 rounded-xl border transition-all ${
-              orchestratorStep >= 2 ? 'border-violet-500/40 bg-violet-950/20' : 'border-white/5 bg-slate-900/30 opacity-50'
-            }`}>
+            <div className="p-4 rounded-xl border border-white/5 bg-slate-900/30 opacity-70">
               <div className="flex items-center space-x-3">
-                {orchestratorStep > 2 ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                ) : orchestratorStep === 2 ? (
-                  <RefreshCw className="w-5 h-5 text-violet-400 animate-spin" />
-                ) : (
-                  <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">2</div>
-                )}
+                <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">2</div>
                 <div>
-                  <h4 className="text-sm font-semibold text-white">Step 2: Table Availability Check at Truffles Bistro</h4>
-                  <p className="text-xs text-slate-400">Available slots: 7:30 PM, 8:15 PM for party of 4.</p>
+                  <h4 className="text-sm font-semibold text-white">Resource Verification & Availability</h4>
+                  <p className="text-xs text-slate-400">Queries internal catalog, inventory, and linked service connectors.</p>
                 </div>
               </div>
             </div>
 
-            <div className={`p-4 rounded-xl border transition-all ${
-              orchestratorStep >= 3 ? 'border-amber-500/40 bg-amber-950/20' : 'border-white/5 bg-slate-900/30 opacity-50'
-            }`}>
+            <div className="p-4 rounded-xl border border-amber-500/30 bg-slate-900/30 opacity-70">
               <div className="flex items-center space-x-3">
-                {orchestratorStep > 3 ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                ) : orchestratorStep === 3 ? (
-                  <ShieldAlert className="w-5 h-5 text-amber-400" />
-                ) : (
-                  <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">3</div>
-                )}
+                <div className="w-5 h-5 rounded-full border border-amber-500/50 flex items-center justify-center text-xs text-amber-400">3</div>
                 <div className="flex-1">
                   <h4 className="text-sm font-semibold text-white flex items-center justify-between">
-                    <span>Step 3: User Confirmation & Security Boundary</span>
-                    {orchestratorStep === 3 && (
-                      <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
-                        APPROVAL REQUIRED
-                      </span>
-                    )}
+                    <span>User Authorization & Security Boundary</span>
+                    <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/30">
+                      HUMAN-IN-THE-LOOP
+                    </span>
                   </h4>
-                  <p className="text-xs text-slate-400">Consequential actions (booking deposit & external messages) require your explicit sign-off.</p>
+                  <p className="text-xs text-slate-400">Consequential actions (payment initiation, reservations) require explicit user sign-off.</p>
                 </div>
               </div>
             </div>
 
-            <div className={`p-4 rounded-xl border transition-all ${
-              orchestratorStep >= 4 ? 'border-emerald-500/40 bg-emerald-950/20' : 'border-white/5 bg-slate-900/30 opacity-50'
-            }`}>
+            <div className="p-4 rounded-xl border border-white/5 bg-slate-900/30 opacity-70">
               <div className="flex items-center space-x-3">
-                {orchestratorStep >= 4 ? (
-                  <CheckCircle2 className="w-5 h-5 text-emerald-400" />
-                ) : (
-                  <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">4</div>
-                )}
+                <div className="w-5 h-5 rounded-full border border-slate-600 flex items-center justify-center text-xs">4</div>
                 <div>
-                  <h4 className="text-sm font-semibold text-white">Step 4: Calendar Invitation Dispatched & Chat Notified</h4>
-                  <p className="text-xs text-slate-400">Simulated calendar event booked for 7:30 PM with map directions.</p>
+                  <h4 className="text-sm font-semibold text-white">Action Execution & Notification</h4>
+                  <p className="text-xs text-slate-400">Dispatches authorized transactions and notifies user via in-app alerts.</p>
                 </div>
               </div>
             </div>
@@ -423,24 +369,16 @@ export const AIAssistantView: React.FC = () => {
               Sovereign User Memory & Context Vault
             </h2>
             <p className="text-sm text-slate-400">
-              You own your contextual memory. Memories are stored locally or in your encrypted private cloud, completely under your control.
+              You own your contextual memory. Memories are stored locally or in your encrypted private cloud, completely under your sovereign control.
             </p>
           </div>
 
-          <div className="space-y-3 max-w-xl">
-            {[
-              { id: 'mem_1', title: 'Dietary Preference', desc: 'Strict vegetarian on Tuesdays and Thursdays. Prefers South Indian & Italian.' },
-              { id: 'mem_2', title: 'Work Location', desc: 'Primary office at Indiranagar 100ft Road, Bengaluru.' },
-              { id: 'mem_3', title: 'Tech Stack Preference', desc: 'Prefers React, TypeScript, Tailwind CSS, and serverless architectures.' },
-            ].map((mem) => (
-              <div key={mem.id} className="p-4 rounded-xl bg-slate-800/80 border border-white/5 flex items-start justify-between gap-4">
-                <div>
-                  <h4 className="text-sm font-semibold text-slate-200">{mem.title}</h4>
-                  <p className="text-xs text-slate-400 mt-1">{mem.desc}</p>
-                </div>
-                <button className="text-xs text-red-400 hover:text-red-300 font-medium">Delete</button>
-              </div>
-            ))}
+          <div className="p-8 text-center rounded-xl bg-slate-800/20 border border-white/5 space-y-2 max-w-xl">
+            <Database className="w-8 h-8 text-slate-600 mx-auto" />
+            <p className="text-xs text-slate-400 font-medium">No saved contextual memories</p>
+            <p className="text-[11px] text-slate-500">
+              Preferences and context saved by you during conversations will appear here. No sample memories are loaded.
+            </p>
           </div>
         </div>
       )}
