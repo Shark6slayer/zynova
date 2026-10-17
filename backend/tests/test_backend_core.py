@@ -193,3 +193,45 @@ async def test_production_startup_skips_demo_seeding(monkeypatch):
         assert len(called) == 0, "Seeding attempted database operations despite production environment!"
     finally:
         client.db_manager.db = original_db
+
+@pytest.mark.asyncio
+async def test_production_payment_balance_never_synthetic(monkeypatch):
+    """Verifies that in production mode, check_bank_balance never returns synthetic balances."""
+    from app.services.payment_provider import PaymentProviderInterface
+
+    monkeypatch.setenv("PAYMENTS_LIVE_MODE", "true")
+    provider = PaymentProviderInterface()
+    assert provider.is_production is True
+
+    result = await provider.check_bank_balance("State Bank of India", "••••••••1234")
+    assert result["status"] == "unsupported"
+    assert result["balance_paise"] is None
+    assert result["balance_inr"] is None
+    assert result["is_test_fixture"] is False
+    assert "Live Account Aggregator" in result["reason"]
+
+@pytest.mark.asyncio
+async def test_environment_production_enforces_payment_safety(monkeypatch):
+    """Verifies that ENVIRONMENT=production enforces is_production=True even without PAYMENTS_LIVE_MODE."""
+    from app.services.payment_provider import PaymentProviderInterface
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("PAYMENTS_LIVE_MODE", raising=False)
+    provider = PaymentProviderInterface()
+    assert provider.is_production is True
+    res = await provider.check_bank_balance("HDFC Bank", "••••••••5678")
+    assert res["status"] == "unsupported"
+    assert res["balance_paise"] is None
+    assert res["is_test_fixture"] is False
+
+@pytest.mark.asyncio
+async def test_payment_webhook_fails_closed_when_secret_missing(monkeypatch):
+    """Verifies that webhook signature verification fails closed if secret is not set."""
+    from app.services.payment_provider import payment_provider
+
+    monkeypatch.delenv("PAYMENTS_WEBHOOK_SECRET", raising=False)
+    payload = b'{"event": "payment.success"}'
+    fake_sig = "a" * 64
+    assert payment_provider.verify_webhook_signature(payload, fake_sig) is False
+    assert payment_provider.verify_webhook_signature(payload, "") is False

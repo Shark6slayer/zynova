@@ -234,7 +234,7 @@ async def check_account_balance(
         nickname=acc.get("nickname"),
         is_default=acc.get("is_default", False),
         balance_paise=bal_paise,
-        balance_inr=round(bal_paise / 100, 2),
+        balance_inr=round(bal_paise / 100, 2) if bal_paise is not None else None,
         last_balance_enquiry=now,
         provider_status=acc.get("provider_status", "connected"),
         is_seed_account=acc.get("is_seed_account", False),

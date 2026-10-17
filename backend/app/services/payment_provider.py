@@ -5,14 +5,20 @@ import hashlib
 from datetime import datetime, timezone
 from typing import Dict, Any, Optional
 
+from app.core.config import settings
+
 class PaymentProviderInterface:
     """
     Abstract/safe provider interface for UPI, Banking, RuPay-on-UPI, and BBPS.
     Clearly marks development simulated fixtures vs. live production connections.
+    Fails closed: if ENVIRONMENT is 'production', sandbox simulations are strictly disabled.
     """
     def __init__(self):
-        self.is_production = os.getenv("PAYMENTS_LIVE_MODE", "false").lower() == "true"
-        self.provider_name = "NPCI_SANDBOX_DEV" if not self.is_production else "NPCI_BBPS_PRODUCTION"
+        env = getattr(settings, "ENVIRONMENT", os.getenv("ENVIRONMENT", "development")).lower()
+        live_mode_flag = os.getenv("PAYMENTS_LIVE_MODE", "false").lower() == "true"
+        # In production environments, production mode is always enforced
+        self.is_production = (env == "production") or live_mode_flag
+        self.provider_name = "NPCI_BBPS_PRODUCTION" if self.is_production else "NPCI_SANDBOX_DEV"
 
     async def verify_vpa(self, vpa: str) -> Dict[str, Any]:
         """Resolves VPA/UPI ID or phone number to recipient name."""
@@ -65,10 +71,21 @@ class PaymentProviderInterface:
 
     async def check_bank_balance(self, bank_name: str, masked_account: str) -> Dict[str, Any]:
         """
-        Queries authorized bank server for verified balance.
-        In development test mode, returns clearly labeled test fixture balance.
+        Queries authorized bank server / Account Aggregator for verified balance.
+        In production, if live bank/Account Aggregator integration is unconfigured,
+        fails explicitly with an unsupported status. Never returns synthetic balances.
         """
-        # Seeded verified balances in paise (e.g. ₹42,500.00 = 4250000 paise)
+        if self.is_production:
+            return {
+                "status": "unsupported",
+                "reason": "Live Account Aggregator or Open Banking balance enquiry integration is not configured in production environment.",
+                "balance_paise": None,
+                "balance_inr": None,
+                "enquiry_time": datetime.now(timezone.utc),
+                "is_test_fixture": False
+            }
+
+        # Sandbox / Dev test fixture mode only (explicitly non-production)
         test_balances = {
             "State Bank of India": 5420000,
             "HDFC Bank": 8425050,
@@ -83,7 +100,7 @@ class PaymentProviderInterface:
             "balance_paise": balance_paise,
             "balance_inr": round(balance_paise / 100, 2),
             "enquiry_time": datetime.now(timezone.utc),
-            "is_test_fixture": not self.is_production
+            "is_test_fixture": True
         }
 
     async def fetch_bbps_bill(self, category: str, biller_id: str, customer_identifier: str) -> Optional[Dict[str, Any]]:
@@ -123,9 +140,23 @@ class PaymentProviderInterface:
         }
 
     def verify_webhook_signature(self, payload_bytes: bytes, signature_header: str) -> bool:
-        """Verifies HMAC-SHA256 signature from provider webhooks."""
-        webhook_secret = os.getenv("PAYMENTS_WEBHOOK_SECRET", "super_ai_payments_secret_key_demo")
-        expected_sig = hmac.new(webhook_secret.encode(), payload_bytes, hashlib.sha256).hexdigest()
-        return hmac.compare_digest(expected_sig, signature_header)
+        """
+        Verifies HMAC-SHA256 signature from provider webhooks.
+        Fails closed (returns False) if PAYMENTS_WEBHOOK_SECRET is not configured.
+        Never falls back to insecure hardcoded secrets.
+        """
+        webhook_secret = os.getenv("PAYMENTS_WEBHOOK_SECRET")
+        if not webhook_secret or not webhook_secret.strip():
+            # Insecure fallback removed. Fail closed when secret is not configured.
+            return False
+
+        if not signature_header or not signature_header.strip():
+            return False
+
+        try:
+            expected_sig = hmac.new(webhook_secret.strip().encode("utf-8"), payload_bytes, hashlib.sha256).hexdigest()
+            return hmac.compare_digest(expected_sig, signature_header.strip())
+        except Exception:
+            return False
 
 payment_provider = PaymentProviderInterface()
