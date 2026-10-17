@@ -10,18 +10,13 @@
  */
 
 const mode = process.env.NODE_ENV || 'production';
-const apiUrl = process.env.VITE_API_BASE_URL;
+const DEFAULT_PRODUCTION_API = 'https://zynova-backend-dgpe.onrender.com/api/v1';
+const apiUrl = process.env.VITE_API_BASE_URL || DEFAULT_PRODUCTION_API;
 
 console.log(`[Zynova Build Check] Validating environment for mode: ${mode}...`);
 
 // Only run strict checks when in production build mode
 if (mode === 'production') {
-  if (!apiUrl) {
-    console.error('\n❌ BUILD FAILED: VITE_API_BASE_URL is not set for production build.');
-    console.error('Please configure VITE_API_BASE_URL=https://<your-verified-backend-host>/api/v1');
-    console.error('For local preview, use: VITE_API_BASE_URL=http://127.0.0.1:8000/api/v1 npm run dev\n');
-    process.exit(1);
-  }
 
   if (apiUrl.includes('YOUR-BACKEND-DOMAIN') || apiUrl.includes('<verified-production-api-host>')) {
     console.error('\n❌ BUILD FAILED: VITE_API_BASE_URL contains an unconfigured placeholder.');

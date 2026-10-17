@@ -19,7 +19,10 @@ class ChatWebSocketService {
     this.isConnecting = true;
     try {
       // Convert http:// to ws:// or https:// to wss://
-      const wsBase = API_BASE_URL.replace(/^http(s)?:\/\//, 'ws$1://');
+      const currentApiBase = apiClient.getApiBaseUrl();
+      const wsBase = currentApiBase.startsWith('/')
+        ? `${window.location.protocol === 'https:' ? 'wss:' : 'ws:'}//${window.location.host}${currentApiBase}`
+        : currentApiBase.replace(/^http(s)?:\/\//, 'ws$1://');
       const wsUrl = `${wsBase}/chat/ws?token=${encodeURIComponent(token)}`;
 
       this.socket = new WebSocket(wsUrl);

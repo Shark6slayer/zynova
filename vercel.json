@@ -3,7 +3,7 @@
   "rewrites": [
     {
       "source": "/api/v1/:path*",
-      "destination": "https://api.zynova.intellidev.in/api/v1/:path*"
+      "destination": "https://zynova-backend-dgpe.onrender.com/api/v1/:path*"
     },
     {
       "source": "/(.*)",
@@ -32,7 +32,7 @@
         },
         {
           "key": "Content-Security-Policy",
-          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; media-src 'self' https: blob:; connect-src 'self' https://api.zynova.intellidev.in wss://api.zynova.intellidev.in http://127.0.0.1:8000 ws://127.0.0.1:8000; frame-ancestors 'none';"
+          "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: https: blob:; media-src 'self' https: blob:; connect-src 'self' https://zynova-backend-dgpe.onrender.com wss://zynova-backend-dgpe.onrender.com https://api.zynova.intellidev.in wss://api.zynova.intellidev.in http://127.0.0.1:8000 ws://127.0.0.1:8000; frame-ancestors 'none';"
         }
       ]
     }

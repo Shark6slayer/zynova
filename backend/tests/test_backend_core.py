@@ -81,3 +81,32 @@ async def test_unauthorized_access():
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
         response = await ac.get("/api/v1/auth/me")
     assert response.status_code == 401
+
+@pytest.mark.asyncio
+async def test_cors_preflight_production_origin():
+    """Verifies that CORS preflight from https://zynova.intellidev.in succeeds with correct headers."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.options(
+            "/api/v1/social/feed",
+            headers={
+                "Origin": "https://zynova.intellidev.in",
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type"
+            }
+        )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://zynova.intellidev.in"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+    assert "GET" in response.headers.get("access-control-allow-methods", "")
+
+@pytest.mark.asyncio
+async def test_cors_simple_request_production_origin():
+    """Verifies that simple GET request from https://zynova.intellidev.in receives CORS headers."""
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.get(
+            "/api/v1/health",
+            headers={"Origin": "https://zynova.intellidev.in"}
+        )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == "https://zynova.intellidev.in"
+    assert response.headers.get("access-control-allow-credentials") == "true"
