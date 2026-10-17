@@ -3,7 +3,23 @@ from typing import Optional
 from app.core.config import settings
 import logging
 
+import certifi
+import urllib.parse
+
 logger = logging.getLogger(__name__)
+
+def sanitize_mongo_uri(uri: str) -> str:
+    """Redacts credentials from MongoDB URI for safe diagnostic logging."""
+    try:
+        parsed = urllib.parse.urlsplit(uri)
+        if parsed.password:
+            netloc = f"{parsed.username}:***@{parsed.hostname}"
+            if parsed.port:
+                netloc += f":{parsed.port}"
+            return urllib.parse.urlunsplit((parsed.scheme, netloc, parsed.path, parsed.query, parsed.fragment))
+        return uri
+    except Exception:
+        return "mongodb://***"
 
 class DatabaseManager:
     client: Optional[AsyncIOMotorClient] = None
@@ -12,12 +28,25 @@ class DatabaseManager:
 db_manager = DatabaseManager()
 
 async def connect_to_database() -> None:
-    """Initializes MongoDB async client and creates required indexes."""
+    """Initializes MongoDB async client with standard TLS CA bundles and creates required indexes."""
     try:
-        logger.info(f"Connecting to MongoDB at {settings.MONGODB_URI}...")
+        safe_uri = sanitize_mongo_uri(settings.MONGODB_URI)
+        logger.info(f"Connecting to MongoDB at {safe_uri}...")
+
+        # Configure Motor/PyMongo with verified CA bundle from certifi
+        client_kwargs = {
+            "serverSelectionTimeoutMS": 5000,
+            "connectTimeoutMS": 10000,
+            "socketTimeoutMS": 10000,
+        }
+        
+        # If connecting via TLS or Atlas SRV, explicitly use certifi CA bundle
+        if "mongodb+srv://" in settings.MONGODB_URI or "tls=true" in settings.MONGODB_URI.lower() or "ssl=true" in settings.MONGODB_URI.lower():
+            client_kwargs["tlsCAFile"] = certifi.where()
+
         db_manager.client = AsyncIOMotorClient(
             settings.MONGODB_URI,
-            serverSelectionTimeoutMS=2000
+            **client_kwargs
         )
         db_manager.db = db_manager.client[settings.MONGODB_DB_NAME]
         
@@ -29,6 +58,10 @@ async def connect_to_database() -> None:
         await _setup_indexes()
     except Exception as e:
         logger.warning(f"Could not connect to MongoDB: {e}. Backend will operate in fallback state for readiness.")
+        if db_manager.client:
+            db_manager.client.close()
+        db_manager.client = None
+        db_manager.db = None
 
 async def _setup_indexes() -> None:
     """Ensures unique and query indexes for collections."""

@@ -28,6 +28,37 @@ async def test_readiness_endpoint():
     assert response.status_code in [200, 503]
     data = response.json()
     assert "database" in data
+    assert "status" in data
+    if response.status_code == 200:
+        assert data["status"] == "ready"
+        assert data["database"] == "connected"
+    else:
+        assert data["status"] == "not_ready"
+        assert data["database"] in ["unavailable", "error"]
+
+@pytest.mark.asyncio
+async def test_readiness_fails_503_when_db_offline(monkeypatch):
+    from app.database import client
+    # Simulate DB disconnection
+    original_db = client.db_manager.db
+    original_client = client.db_manager.client
+    try:
+        client.db_manager.db = None
+        client.db_manager.client = None
+        # Mock connect_to_database so it fails
+        async def fail_connect():
+            raise ConnectionError("Simulated Atlas TLS Handshake Error")
+        monkeypatch.setattr(client, "connect_to_database", fail_connect)
+
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+            response = await ac.get("/api/v1/ready")
+        assert response.status_code == 503
+        data = response.json()
+        assert data["status"] == "not_ready"
+        assert data["database"] == "unavailable"
+    finally:
+        client.db_manager.db = original_db
+        client.db_manager.client = original_client
 
 def test_password_hashing():
     raw_pass = "SovereignPass2026!"
