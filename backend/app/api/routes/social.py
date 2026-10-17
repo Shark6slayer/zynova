@@ -26,6 +26,7 @@ from app.core.rate_limit import (
     check_comment_rate_limit,
     check_report_rate_limit
 )
+from app.core.scanner import scan_quarantined_media, QUARANTINE_DIR
 
 # Media storage configuration
 MEDIA_STORAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "media"))
@@ -772,13 +773,14 @@ async def upload_social_media(
 
     ext = ALLOWED_VIDEO_MIMES[content_type] if is_video else ALLOWED_IMAGE_MIMES[content_type]
     random_filename = f"{uuid.uuid4().hex}{ext}"
+    quarantine_path = os.path.join(QUARANTINE_DIR, f"quarantine_{random_filename}")
     dest_path = os.path.join(MEDIA_STORAGE_DIR, random_filename)
 
     total_bytes = 0
     header_checked = False
 
     try:
-        async with aiofiles.open(dest_path, "wb") as out_file:
+        async with aiofiles.open(quarantine_path, "wb") as out_file:
             while True:
                 chunk = await file.read(CHUNK_SIZE)
                 if not chunk:
@@ -800,17 +802,31 @@ async def upload_social_media(
                     )
 
                 await out_file.write(chunk)
+
+        # Malware scan before promotion
+        is_clean, scan_msg = await scan_quarantined_media(quarantine_path, file.filename or random_filename)
+        if not is_clean:
+            if os.path.exists(quarantine_path):
+                try:
+                    os.remove(quarantine_path)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=scan_msg)
+
+        # Atomic promotion from quarantine to media storage
+        os.replace(quarantine_path, dest_path)
+
     except HTTPException:
-        if os.path.exists(dest_path):
+        if os.path.exists(quarantine_path):
             try:
-                os.remove(dest_path)
+                os.remove(quarantine_path)
             except Exception:
                 pass
         raise
     except Exception as e:
-        if os.path.exists(dest_path):
+        if os.path.exists(quarantine_path):
             try:
-                os.remove(dest_path)
+                os.remove(quarantine_path)
             except Exception:
                 pass
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Storage error: {str(e)}")

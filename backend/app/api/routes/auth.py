@@ -10,10 +10,12 @@ from app.core.security import (
     create_access_token, create_refresh_token, decode_token
 )
 from app.database.client import get_database
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_current_user_payload
+from app.core.token_revocation import revoke_token
 
 import re
 from app.core.rate_limit import check_auth_rate_limit
+from app.core.audit_ledger import record_audit_event
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -100,6 +102,11 @@ async def login(credentials: UserLogin):
 
     user = await db.users.find_one({"email": credentials.email.lower().strip()})
     if not user or not verify_password(credentials.password, user["hashed_password"]):
+        await record_audit_event(
+            event_type="AUTH_FAILURE",
+            raw_actor_id=None,
+            metadata={"reason": "bad_credentials"}
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Incorrect email or password"
@@ -114,6 +121,12 @@ async def login(credentials: UserLogin):
         {"user_id": user_id},
         {"$set": {"token": refresh_token, "updated_at": datetime.now(timezone.utc)}},
         upsert=True
+    )
+
+    await record_audit_event(
+        event_type="AUTH_SUCCESS",
+        raw_actor_id=user_id,
+        metadata={"method": "password"}
     )
 
     return TokenResponse(
@@ -154,10 +167,26 @@ async def refresh_token_endpoint(data: TokenRefreshRequest):
     )
 
 @router.post("/logout", status_code=status.HTTP_200_OK)
-async def logout(current_user: dict = Depends(get_current_user)):
+async def logout(
+    current_user: dict = Depends(get_current_user),
+    payload: dict = Depends(get_current_user_payload)
+):
     db = get_database()
     if db is not None:
         await db.refresh_tokens.delete_many({"user_id": current_user["id"]})
+
+    jti = payload.get("jti")
+    exp = payload.get("exp")
+    if jti and exp:
+        exp_dt = datetime.fromtimestamp(exp, tz=timezone.utc)
+        await revoke_token(jti=jti, expires_at=exp_dt, reason="logout", user_id=current_user["id"])
+
+    await record_audit_event(
+        event_type="AUTH_LOGOUT",
+        raw_actor_id=current_user["id"],
+        metadata={"session_revoked": bool(jti)}
+    )
+
     return {"status": "logged_out", "detail": "Session revoked"}
 
 @router.get("/me", response_model=UserProfileResponse)

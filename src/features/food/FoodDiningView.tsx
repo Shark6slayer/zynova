@@ -2,9 +2,11 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { 
   Utensils, Search, Star, Clock, ShoppingBag, Plus, Minus, 
   MapPin, CheckCircle2, ChevronRight, X, Loader2, AlertCircle, 
-  ArrowLeft, RefreshCw, Receipt, Ban, ChefHat, Edit3, Trash2, CheckCircle, Store, Power, Check
+  ArrowLeft, RefreshCw, Receipt, Ban, ChefHat, Edit3, Trash2, CheckCircle, Store, Power, Check, WifiOff
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useOfflineSync } from '../../context/OfflineSyncContext';
+import { setCachedPublicData, getCachedPublicData } from '../../services/offlineStorage';
 import { 
   apiClient, 
   type RestaurantResponse, 
@@ -37,6 +39,8 @@ export const FoodDiningView: React.FC = () => {
   const [restaurantError, setRestaurantError] = useState<string | null>(null);
   const [filterVegOnly, setFilterVegOnly] = useState(false);
   const [searchFilter, setSearchFilter] = useState('');
+  const [isCachedRestaurants, setIsCachedRestaurants] = useState<boolean>(false);
+  const [restaurantCacheTimestamp, setRestaurantCacheTimestamp] = useState<number | null>(null);
 
   // Selected restaurant menu view
   const [selectedRestaurant, setSelectedRestaurant] = useState<RestaurantResponse | null>(null);
@@ -71,15 +75,45 @@ export const FoodDiningView: React.FC = () => {
     localStorage.setItem('super_ai_food_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Fetch Restaurants
+  // Fetch Restaurants with IndexedDB Cache Fallback (Phase 6)
   const fetchRestaurants = useCallback(async () => {
     setIsLoadingRestaurants(true);
     setRestaurantError(null);
+
+    const cacheKey = `catalog:restaurants:${filterVegOnly}:${searchFilter}`;
+
     try {
       const data = await apiClient.listRestaurants(filterVegOnly, searchFilter || undefined);
       setRestaurants(data);
+      setIsCachedRestaurants(false);
+      // Cache locally in IndexedDB for offline access
+      setCachedPublicData(cacheKey, data, 'restaurants').catch((e) => {
+        console.warn('Failed to cache restaurants:', e);
+      });
     } catch (err: any) {
-      setRestaurantError(err.message || 'Failed to load restaurant directory');
+      // Offline fallback
+      try {
+        const cached = await getCachedPublicData<RestaurantResponse[]>(cacheKey);
+        if (cached && cached.data && cached.data.length > 0) {
+          setRestaurants(cached.data);
+          setIsCachedRestaurants(true);
+          setRestaurantCacheTimestamp(cached.cachedAt);
+          setRestaurantError(null);
+        } else {
+          // Generic fallback
+          const genericCached = await getCachedPublicData<RestaurantResponse[]>('catalog:restaurants:false:');
+          if (genericCached && genericCached.data && genericCached.data.length > 0) {
+            setRestaurants(genericCached.data);
+            setIsCachedRestaurants(true);
+            setRestaurantCacheTimestamp(genericCached.cachedAt);
+            setRestaurantError(null);
+          } else {
+            setRestaurantError(err.message || 'Offline mode: No cached restaurants found. Connect to browse restaurants.');
+          }
+        }
+      } catch {
+        setRestaurantError(err.message || 'Failed to load restaurant directory');
+      }
     } finally {
       setIsLoadingRestaurants(false);
     }
@@ -1141,6 +1175,23 @@ export const FoodDiningView: React.FC = () => {
                 <span>Pure Veg</span>
               </button>
             </div>
+
+            {/* Offline Cached Restaurants Warning Notice (Phase 6) */}
+            {isCachedRestaurants && (
+              <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-xs flex items-center justify-between backdrop-blur-md">
+                <div className="flex items-center space-x-2.5">
+                  <WifiOff className="w-4 h-4 text-amber-400 shrink-0" />
+                  <span>
+                    <strong>Cached Restaurant Directory:</strong> Browsing offline. Internet connection required to verify live kitchen status and place food orders.
+                  </span>
+                </div>
+                {restaurantCacheTimestamp && (
+                  <span className="text-[10px] text-amber-400/80 shrink-0 pl-2">
+                    Cached: {new Date(restaurantCacheTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                  </span>
+                )}
+              </div>
+            )}
 
             {restaurantError && (
               <div className="p-4 rounded-2xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-xs flex items-center space-x-2">

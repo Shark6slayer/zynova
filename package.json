@@ -5,7 +5,9 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "validate-env": "node ./scripts/validate-env.js",
+    "build": "node ./scripts/validate-env.js && tsc -b && vite build",
+    "build:skip-val": "tsc -b && vite build",
     "lint": "oxlint",
     "preview": "vite preview",
     "cap:sync": "npx cap sync",
@@ -38,5 +40,8 @@
     "oxlint": "^1.81.0",
     "typescript": "~6.0.2",
     "vite": "^8.3.0"
+  },
+  "overrides": {
+    "uuid": "^11.1.1"
   }
 }

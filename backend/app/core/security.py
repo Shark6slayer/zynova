@@ -18,8 +18,10 @@ def get_password_hash(password: str) -> str:
     """Hashes plain password using Argon2id."""
     return pwd_context.hash(password)
 
+import uuid
+
 def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
-    """Creates short-lived JWT access token."""
+    """Creates short-lived JWT access token with unique jti identifier."""
     to_encode = data.copy()
     now = datetime.now(timezone.utc)
     if expires_delta:
@@ -30,11 +32,10 @@ def create_access_token(data: Dict[str, Any], expires_delta: Optional[timedelta]
     to_encode.update({
         "exp": expire,
         "iat": now,
+        "jti": data.get("jti") or str(uuid.uuid4()),
         "type": "access"
     })
     return jwt.encode(to_encode, settings.JWT_SECRET_KEY, algorithm=settings.JWT_ALGORITHM)
-
-import uuid
 
 def create_refresh_token(data: Dict[str, Any], expires_delta: Optional[timedelta] = None) -> str:
     """Creates long-lived JWT refresh token with unique jti identifier."""

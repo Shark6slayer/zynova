@@ -20,6 +20,7 @@ from app.api.deps import get_current_user
 from app.core.rate_limit import check_payment_rate_limit, check_balance_enquiry_rate_limit
 from app.services.payment_provider import payment_provider
 from app.services.notification_service import create_event_notification
+from app.core.audit_ledger import record_audit_event
 
 router = APIRouter(prefix="/payments", tags=["UPI, Banking & Payments"])
 
@@ -431,6 +432,18 @@ async def send_payment(
 
     res = await db.payment_transactions.insert_one(tx_doc)
     tx_id = str(res.inserted_id)
+
+    # Phase 13: Record payment lifecycle event in Audit Ledger
+    await record_audit_event(
+        event_type="ORDER_SECURITY_STATUS_CHANGED",
+        raw_actor_id=current_user["id"],
+        metadata={
+            "transaction_ref": tx_ref,
+            "category": "payment_simulated",
+            "status": status_str,
+            "amount_paise": payload.amount_paise
+        }
+    )
 
     # Trigger notification
     await create_event_notification(

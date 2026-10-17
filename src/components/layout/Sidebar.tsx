@@ -105,8 +105,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
                 <Sparkles className="w-4 h-4" />
               </div>
               <div className="overflow-hidden">
-                <span className="font-extrabold text-sm tracking-wider text-inherit block leading-none">SUPER_AI</span>
-                <span className="text-[9px] font-mono tracking-tight text-slate-400 block mt-0.5">S-TIER PLATFORM</span>
+                <span className="font-extrabold text-sm tracking-wider text-inherit block leading-none">ZYNOVA</span>
+                <span className="text-[9px] font-mono tracking-tight text-slate-400 block mt-0.5">UNIFIED PLATFORM</span>
               </div>
             </div>
           )}
@@ -116,7 +116,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
               onClick={() => handleNavClick('home')}
               className="mx-auto w-8 h-8 rounded-xl flex items-center justify-center text-white shadow-md cursor-pointer transition-transform hover:scale-105"
               style={{ backgroundColor: preferences.accentColor || '#8b5cf6' }}
-              title="SUPER_AI Home"
+              title="Zynova Home"
             >
               <Sparkles className="w-4 h-4" />
             </div>

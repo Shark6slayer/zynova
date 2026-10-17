@@ -11,20 +11,22 @@ import {
 import type { NavModuleId } from '../../types';
 import { t } from '../../i18n';
 
-// Feature views (lazy evaluation & active modules)
+// Feature views (HomeDashboardView is eagerly loaded for instant LCP)
 import { HomeDashboardView } from '../../features/home/HomeDashboardView';
-import { AIAssistantView } from '../../features/ai-assistant/AIAssistantView';
-import { UniversalSearchView } from '../../features/search/UniversalSearchView';
-import { ChatModuleView } from '../../features/chat/ChatModuleView';
-import { SocialFeedView } from '../../features/social/SocialFeedView';
-import { VideoStreamView } from '../../features/video/VideoStreamView';
-import { FoodDiningView } from '../../features/food/FoodDiningView';
-import { ShoppingView } from '../../features/shopping/ShoppingView';
-import { PaymentsView } from '../../features/payments/PaymentsView';
-import { CloudDriveView } from '../../features/cloud/CloudDriveView';
-import { CustomizationStudioView } from '../../features/customization/CustomizationStudioView';
-import { NotificationsCenterView } from '../../features/notifications/NotificationsCenterView';
-import { SettingsAccountView } from '../../features/settings/SettingsAccountView';
+
+// Lazy-loaded secondary views for code splitting and sub-200kB initial bundle
+const AIAssistantView = React.lazy(() => import('../../features/ai-assistant/AIAssistantView').then(m => ({ default: m.AIAssistantView })));
+const UniversalSearchView = React.lazy(() => import('../../features/search/UniversalSearchView').then(m => ({ default: m.UniversalSearchView })));
+const ChatModuleView = React.lazy(() => import('../../features/chat/ChatModuleView').then(m => ({ default: m.ChatModuleView })));
+const SocialFeedView = React.lazy(() => import('../../features/social/SocialFeedView').then(m => ({ default: m.SocialFeedView })));
+const VideoStreamView = React.lazy(() => import('../../features/video/VideoStreamView').then(m => ({ default: m.VideoStreamView })));
+const FoodDiningView = React.lazy(() => import('../../features/food/FoodDiningView').then(m => ({ default: m.FoodDiningView })));
+const ShoppingView = React.lazy(() => import('../../features/shopping/ShoppingView').then(m => ({ default: m.ShoppingView })));
+const PaymentsView = React.lazy(() => import('../../features/payments/PaymentsView').then(m => ({ default: m.PaymentsView })));
+const CloudDriveView = React.lazy(() => import('../../features/cloud/CloudDriveView').then(m => ({ default: m.CloudDriveView })));
+const CustomizationStudioView = React.lazy(() => import('../../features/customization/CustomizationStudioView').then(m => ({ default: m.CustomizationStudioView })));
+const NotificationsCenterView = React.lazy(() => import('../../features/notifications/NotificationsCenterView').then(m => ({ default: m.NotificationsCenterView })));
+const SettingsAccountView = React.lazy(() => import('../../features/settings/SettingsAccountView').then(m => ({ default: m.SettingsAccountView })));
 
 export const AppShell: React.FC = () => {
   const { activeModule, setActiveModule, activeTheme, preferences, isMobileNavOpen, setIsMobileNavOpen } = useApp();
@@ -137,7 +139,17 @@ export const AppShell: React.FC = () => {
           tabIndex={-1}
           className="flex-1 overflow-y-auto p-3.5 sm:p-5 md:p-6 pb-20 md:pb-6 relative z-10 focus:outline-none"
         >
-          {renderActiveModule()}
+          <React.Suspense fallback={
+            <div className="flex flex-col items-center justify-center min-h-[50vh] space-y-3">
+              <div 
+                className="w-8 h-8 border-3 border-t-transparent rounded-full animate-spin"
+                style={{ borderColor: `${preferences.accentColor || '#8b5cf6'} transparent transparent transparent` }}
+              />
+              <span className="text-xs text-slate-400 font-mono tracking-wider">Loading module...</span>
+            </div>
+          }>
+            {renderActiveModule()}
+          </React.Suspense>
         </main>
 
         {/* Mobile Sticky Bottom Navigation Bar */}

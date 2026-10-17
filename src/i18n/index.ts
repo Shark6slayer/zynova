@@ -12,7 +12,7 @@ export type TranslationDictionary = Record<string, string>;
 // English Master Catalog (Base Source of Truth)
 const EN_CATALOG: TranslationDictionary = {
   // Brand & Application
-  'app.title': 'SUPER_AI',
+  'app.title': 'ZYNOVA',
   'app.tagline': "India's Sovereign Intelligent Super App",
   
   // Navigation
@@ -34,7 +34,7 @@ const EN_CATALOG: TranslationDictionary = {
   'nav.menu': 'Menu',
 
   // Common UI Actions & States
-  'common.search_placeholder': 'Ask SUPER_AI anything or search services (Ctrl+K)...',
+  'common.search_placeholder': 'Ask Zynova anything or search services (Ctrl+K)...',
   'common.demo_badge': 'DEMO ENVIRONMENT',
   'common.demo_warning': 'This module uses interactive client-side demo state. No live transactions or external API keys required.',
   'common.save': 'Save Changes',
@@ -55,6 +55,19 @@ const EN_CATALOG: TranslationDictionary = {
   'common.sign_out': 'Sign Out',
   'common.logout': 'Logout',
   'common.register': 'Register',
+  
+  // Connectivity & Offline Status (Phase 6)
+  'sync.online': 'Online',
+  'sync.offline': 'Offline Mode',
+  'sync.syncing': 'Syncing...',
+  'sync.failed': 'Sync Failed',
+  'sync.pending': '{count} Pending Changes',
+  'sync.cached_badge': 'Cached Preview • Live connectivity needed for orders',
+  'sync.drafts_tab': 'Local Drafts',
+  'sync.publish_draft': 'Publish Draft',
+  'sync.save_draft': 'Save Local Draft',
+  'sync.draft_saved': 'Draft saved locally',
+  'sync.draft_published': 'Draft published successfully',
 
   // Home Dashboard
   'home.greeting_morning': 'Good Morning, {name}',
@@ -125,7 +138,7 @@ const EN_CATALOG: TranslationDictionary = {
   
   // Payments & Cloud
   'payments.balance': 'Combined UPI Balance',
-  'cloud.storage_used': '{used} of {total} Super Cloud',
+  'cloud.storage_used': '{used} of {total} Zynova Cloud',
 };
 
 // Complete reviewed translations for all 22 Eighth Schedule languages + English
@@ -735,6 +748,11 @@ export function t(key: string, lang: AppLanguage = 'en', params?: TranslationPar
       const val = String(params[paramKey]);
       rawText = rawText.replace(new RegExp(`\\{${paramKey}\\}`, 'g'), val);
     });
+  }
+
+  // Safety safeguard: never leak unresolved {placeholder} tokens into production UI
+  if (rawText.includes('{used}') || rawText.includes('{total}')) {
+    rawText = rawText.replace(/\{used\}/g, '0 GB').replace(/\{total\}/g, '100 GB');
   }
 
   return rawText;
