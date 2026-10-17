@@ -3,9 +3,17 @@ import {
   Heart, MessageCircle, Share2, 
   Image as ImageIcon, Send, MoreHorizontal, UserCheck, UserPlus, 
   AlertCircle, Loader2, Edit3, Trash2, Flag, X, ArrowLeft, RefreshCw,
-  Compass, Play, Pause, Volume2, VolumeX, Upload, Film, Search, User
+  Compass, Play, Pause, Volume2, VolumeX, Upload, Film, Search, User,
+  FileText, Save, CheckCircle
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useOfflineSync } from '../../context/OfflineSyncContext';
+import { 
+  saveLocalDraft, 
+  getLocalDraftsByUser, 
+  deleteLocalDraft, 
+  type LocalPostDraft 
+} from '../../services/offlineStorage';
 import { 
   apiClient, 
   type PostResponse, 
@@ -17,13 +25,19 @@ import {
 
 export const SocialFeedView: React.FC = () => {
   const { user, isAuthenticated, openLoginModal } = useAuth();
+  const { isOnline } = useOfflineSync();
   const [, startTransition] = useTransition();
 
-  // Navigation tabs: 'discovery' | 'following' | 'reels' | 'explore' | 'my-profile'
-  const [feedMode, setFeedMode] = useState<'discovery' | 'following' | 'reels' | 'explore' | 'my-profile'>('discovery');
+  // Navigation tabs: 'discovery' | 'following' | 'reels' | 'explore' | 'my-profile' | 'drafts'
+  const [feedMode, setFeedMode] = useState<'discovery' | 'following' | 'reels' | 'explore' | 'my-profile' | 'drafts'>('discovery');
   const [posts, setPosts] = useState<PostResponse[]>([]);
   const [isLoadingFeed, setIsLoadingFeed] = useState<boolean>(true);
   const [feedError, setFeedError] = useState<string | null>(null);
+
+  // Local drafts state (Phase 6)
+  const [localDrafts, setLocalDrafts] = useState<LocalPostDraft[]>([]);
+  const [draftNotice, setDraftNotice] = useState<string | null>(null);
+  const [publishingDraftId, setPublishingDraftId] = useState<string | null>(null);
 
   // New post state
   const [newContent, setNewContent] = useState('');
@@ -73,8 +87,28 @@ export const SocialFeedView: React.FC = () => {
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
 
+  // Fetch Local Drafts
+  const currentUserId = user?.id || 'guest';
+  const fetchDrafts = useCallback(async () => {
+    try {
+      const savedDrafts = await getLocalDraftsByUser(currentUserId);
+      setLocalDrafts(savedDrafts);
+    } catch (e) {
+      console.warn('Failed to load local drafts:', e);
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    fetchDrafts();
+  }, [fetchDrafts]);
+
   // Fetch Feed
-  const fetchFeed = useCallback(async (mode: 'discovery' | 'following' | 'reels' | 'explore' | 'my-profile') => {
+  const fetchFeed = useCallback(async (mode: 'discovery' | 'following' | 'reels' | 'explore' | 'my-profile' | 'drafts') => {
+    if (mode === 'drafts') {
+      setIsLoadingFeed(false);
+      fetchDrafts();
+      return;
+    }
     if (mode === 'explore' || mode === 'my-profile') {
       setIsLoadingFeed(false);
       return;
@@ -91,11 +125,98 @@ export const SocialFeedView: React.FC = () => {
     } finally {
       setIsLoadingFeed(false);
     }
-  }, []);
+  }, [fetchDrafts]);
 
   useEffect(() => {
     fetchFeed(feedMode);
   }, [feedMode, fetchFeed]);
+
+  // Save to Local Drafts immediately
+  const handleSaveDraft = async () => {
+    if (!newContent.trim() && !newImageUrl.trim() && !selectedFile) {
+      alert('Draft is empty. Add content or media to save.');
+      return;
+    }
+
+    const draftId = 'draft_' + Date.now() + '_' + Math.random().toString(36).substring(2, 7);
+    const newDraft: LocalPostDraft = {
+      id: draftId,
+      userId: currentUserId,
+      content: newContent.trim(),
+      mediaUrl: newImageUrl.trim() || undefined,
+      mediaType: (newImageUrl && anyVideoExtension(newImageUrl)) ? 'video' : 'image',
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+      status: 'draft',
+    };
+
+    try {
+      await saveLocalDraft(newDraft);
+      setNewContent('');
+      setNewImageUrl('');
+      setSelectedFile(null);
+      setShowImageInput(false);
+      setDraftNotice('Draft saved locally to your device!');
+      fetchDrafts();
+      setTimeout(() => setDraftNotice(null), 3000);
+    } catch (err: any) {
+      alert('Failed to save draft locally: ' + err.message);
+    }
+  };
+
+  // Delete Local Draft
+  const handleDeleteDraft = async (draftId: string) => {
+    if (!confirm('Are you sure you want to permanently delete this local draft?')) return;
+    try {
+      await deleteLocalDraft(draftId);
+      setLocalDrafts((prev) => prev.filter((d) => d.id !== draftId));
+    } catch (err: any) {
+      alert('Failed to delete draft: ' + err.message);
+    }
+  };
+
+  // Explicit Publish Draft Workflow (Requires online connectivity and user trigger)
+  const handlePublishDraft = async (draft: LocalPostDraft) => {
+    if (!isAuthenticated) {
+      openLoginModal();
+      return;
+    }
+    if (!isOnline) {
+      alert('Cannot publish draft while offline. Connect to the internet to publish.');
+      return;
+    }
+
+    setPublishingDraftId(draft.id);
+    try {
+      const created = await apiClient.createSocialPost({
+        content: draft.content || 'Shared a moment',
+        image_url: draft.mediaType === 'image' ? draft.mediaUrl : undefined,
+        media_url: draft.mediaUrl,
+        media_type: draft.mediaType || 'image',
+      });
+
+      // Mark published only upon server confirmation
+      await deleteLocalDraft(draft.id);
+      setLocalDrafts((prev) => prev.filter((d) => d.id !== draft.id));
+      setPosts((prev) => [created, ...prev]);
+      setDraftNotice('Draft published to feed successfully!');
+      setTimeout(() => setDraftNotice(null), 3000);
+    } catch (err: any) {
+      console.error('Publish draft failed:', err);
+      // Update draft with error status
+      const updatedDraft: LocalPostDraft = {
+        ...draft,
+        status: 'failed',
+        lastError: err?.message || 'Publishing failed. Check connection.',
+        updatedAt: new Date().toISOString(),
+      };
+      await saveLocalDraft(updatedDraft);
+      fetchDrafts();
+      alert(`Publishing failed: ${err.message || 'Server error'}. Draft retained locally.`);
+    } finally {
+      setPublishingDraftId(null);
+    }
+  };
 
   // Create Post with File Upload Support
   const handleCreatePost = async (e: React.FormEvent) => {
@@ -476,6 +597,25 @@ export const SocialFeedView: React.FC = () => {
               <span>Profile</span>
             </button>
           )}
+          <button
+            onClick={() => {
+              setFeedMode('drafts');
+              startTransition(() => {});
+            }}
+            className={`px-3 py-1.5 text-xs font-semibold rounded-xl transition flex items-center space-x-1.5 ${
+              feedMode === 'drafts'
+                ? 'bg-amber-600 text-white shadow'
+                : 'text-slate-400 hover:text-slate-200 hover:bg-white/5'
+            }`}
+          >
+            <FileText className="w-3.5 h-3.5" />
+            <span>Drafts</span>
+            {localDrafts.length > 0 && (
+              <span className="px-1.5 py-0.2 text-[10px] bg-white/20 rounded-full font-bold ml-1">
+                {localDrafts.length}
+              </span>
+            )}
+          </button>
         </div>
         <button
           onClick={() => fetchFeed(feedMode)}
@@ -685,9 +825,132 @@ export const SocialFeedView: React.FC = () => {
             </div>
           )}
         </div>
+      ) : feedMode === 'drafts' ? (
+        /* LOCAL DRAFTS VIEW (Phase 6 Offline-First) */
+        <div className="space-y-4">
+          <div className="p-4 rounded-2xl bg-amber-500/10 border border-amber-500/20 text-amber-200 text-xs flex items-center justify-between">
+            <div className="flex items-center space-x-2">
+              <FileText className="w-4 h-4 shrink-0 text-amber-400" />
+              <span>
+                Local drafts are stored securely on this device and persist across reloads.
+                You can review, edit, or publish them whenever you are ready.
+              </span>
+            </div>
+          </div>
+
+          {draftNotice && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center space-x-2 animate-fade-in">
+              <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{draftNotice}</span>
+            </div>
+          )}
+
+          {localDrafts.length === 0 ? (
+            <div className="text-center py-16 bg-slate-900/40 rounded-3xl border border-white/5 p-8 space-y-3">
+              <FileText className="w-12 h-12 text-slate-600 mx-auto" />
+              <h3 className="text-sm font-semibold text-slate-300">No Local Drafts</h3>
+              <p className="text-xs text-slate-500 max-w-sm mx-auto">
+                Write a post while offline or tap "Save Draft" in the composer to save ideas locally.
+              </p>
+              <button
+                onClick={() => setFeedMode('discovery')}
+                className="px-4 py-2 bg-violet-600 text-white rounded-xl text-xs font-semibold hover:bg-violet-500 transition shadow"
+              >
+                Go to Feed Composer
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              {localDrafts.map((draft) => (
+                <div
+                  key={draft.id}
+                  className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 space-y-3 backdrop-blur-md"
+                >
+                  <div className="flex items-start justify-between">
+                    <div className="flex items-center space-x-2">
+                      <span className="px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold uppercase tracking-wider">
+                        {draft.status === 'failed' ? 'Publish Failed' : 'Local Draft'}
+                      </span>
+                      <span className="text-[11px] text-slate-500">
+                        {new Date(draft.updatedAt).toLocaleDateString()} {new Date(draft.updatedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                      </span>
+                    </div>
+                    <button
+                      onClick={() => handleDeleteDraft(draft.id)}
+                      className="p-1 text-slate-400 hover:text-rose-400 transition"
+                      title="Delete Draft"
+                    >
+                      <Trash2 className="w-4 h-4" />
+                    </button>
+                  </div>
+
+                  <p className="text-xs md:text-sm text-slate-200 whitespace-pre-wrap">
+                    {draft.content}
+                  </p>
+
+                  {draft.mediaUrl && (
+                    <div className="rounded-xl overflow-hidden border border-white/10 max-h-48">
+                      {draft.mediaType === 'video' ? (
+                        <video src={draft.mediaUrl} className="w-full h-full object-cover" controls />
+                      ) : (
+                        <img src={draft.mediaUrl} alt="Draft Media" className="w-full h-full object-cover" />
+                      )}
+                    </div>
+                  )}
+
+                  {draft.lastError && (
+                    <div className="p-2.5 rounded-xl bg-rose-500/10 border border-rose-500/20 text-rose-300 text-[11px] flex items-center space-x-2">
+                      <AlertCircle className="w-3.5 h-3.5 shrink-0" />
+                      <span>{draft.lastError}</span>
+                    </div>
+                  )}
+
+                  <div className="flex items-center justify-end space-x-2 pt-2 border-t border-white/5">
+                    <button
+                      onClick={() => {
+                        setNewContent(draft.content);
+                        setNewImageUrl(draft.mediaUrl || '');
+                        if (draft.mediaUrl) setShowImageInput(true);
+                        setFeedMode('discovery');
+                      }}
+                      className="px-3 py-1.5 rounded-xl text-slate-300 hover:text-white hover:bg-white/5 text-xs font-medium transition flex items-center space-x-1"
+                    >
+                      <Edit3 className="w-3.5 h-3.5" />
+                      <span>Edit in Composer</span>
+                    </button>
+                    <button
+                      onClick={() => handlePublishDraft(draft)}
+                      disabled={publishingDraftId === draft.id}
+                      className="px-3.5 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition shadow flex items-center space-x-1"
+                    >
+                      {publishingDraftId === draft.id ? (
+                        <>
+                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          <span>Publishing...</span>
+                        </>
+                      ) : (
+                        <>
+                          <Send className="w-3.5 h-3.5" />
+                          <span>Publish Now</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
       ) : (
         /* STANDARD SOCIAL FEED (Discovery / Following) */
         <>
+          {draftNotice && (
+            <div className="p-3 rounded-xl bg-emerald-500/10 border border-emerald-500/20 text-emerald-300 text-xs flex items-center space-x-2 animate-fade-in">
+              <CheckCircle className="w-4 h-4 shrink-0 text-emerald-400" />
+              <span>{draftNotice}</span>
+            </div>
+          )}
+
           {/* Post Composer Card */}
           <div className="p-4 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-md space-y-3">
             <div className="flex items-start space-x-3">
@@ -797,23 +1060,36 @@ export const SocialFeedView: React.FC = () => {
                 </span>
               </div>
 
-              <button
-                onClick={handleCreatePost}
-                disabled={(!newContent.trim() && !selectedFile) || isSubmittingPost}
-                className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition shadow flex items-center space-x-1.5"
-              >
-                {isSubmittingPost ? (
-                  <>
-                    <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                    <span>Posting...</span>
-                  </>
-                ) : (
-                  <>
-                    <Send className="w-3.5 h-3.5" />
-                    <span>Publish</span>
-                  </>
-                )}
-              </button>
+              <div className="flex items-center space-x-2">
+                <button
+                  type="button"
+                  onClick={handleSaveDraft}
+                  disabled={!newContent.trim() && !newImageUrl.trim() && !selectedFile}
+                  className="px-3 py-1.5 bg-white/5 hover:bg-white/10 text-slate-300 rounded-xl text-xs font-semibold disabled:opacity-40 transition flex items-center space-x-1"
+                  title="Save post as local draft on device"
+                >
+                  <Save className="w-3.5 h-3.5" />
+                  <span>Save Draft</span>
+                </button>
+
+                <button
+                  onClick={handleCreatePost}
+                  disabled={(!newContent.trim() && !selectedFile) || isSubmittingPost}
+                  className="px-4 py-1.5 bg-violet-600 hover:bg-violet-500 text-white rounded-xl text-xs font-semibold disabled:opacity-40 transition shadow flex items-center space-x-1.5"
+                >
+                  {isSubmittingPost ? (
+                    <>
+                      <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                      <span>Posting...</span>
+                    </>
+                  ) : (
+                    <>
+                      <Send className="w-3.5 h-3.5" />
+                      <span>Publish</span>
+                    </>
+                  )}
+                </button>
+              </div>
             </div>
           </div>
 

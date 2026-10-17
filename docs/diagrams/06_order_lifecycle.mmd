@@ -1,0 +1,37 @@
+sequenceDiagram
+    autonumber
+    actor Customer as Customer
+    participant API as Shopping / Food API
+    participant Inv as Inventory Engine
+    participant DB as MongoDB (Products/Orders)
+    participant Ledger as RFC 8785 Audit Ledger
+
+    Customer->>API: POST /shopping/orders (item_id, qty=2, Idempotency-Key)
+    API->>API: Discard client-submitted prices & calculate integer paise
+    
+    API->>Inv: Atomic Stock Decrement
+    Inv->>DB: update_one({_id: prod_id, stock: {$gte: 2}}, {$inc: {stock: -2}})
+    alt Stock Insufficient
+        DB-->>Inv: Modified Count = 0
+        Inv-->>API: Insufficient Stock Error
+        API-->>Customer: 400 Bad Request (Item Out of Stock)
+    else Stock Reserved
+        DB-->>Inv: Modified Count = 1
+        Inv-->>API: Stock Reserved
+    end
+
+    API->>DB: Insert Order Record (status: "pending", total_paise)
+    DB-->>API: Order Saved (order_id)
+
+    API->>Ledger: Append Event (type="order.created", actor=pseudonym, order_id)
+    Ledger-->>API: Event Chained (SHA-256)
+
+    API-->>Customer: 201 Created (order_id, status: "pending", total_paise)
+
+    Note over Customer,Ledger: Order Cancellation & Stock Restoration
+    Customer->>API: POST /shopping/orders/{id}/cancel
+    API->>DB: Verify Ownership (user_id == current_user)
+    API->>DB: Update order status to "cancelled"
+    API->>DB: Restore stock {$inc: {stock: +2}}
+    API->>Ledger: Append Event (type="order.cancelled", order_id)
+    API-->>Customer: 200 OK (Order Cancelled & Stock Restored)

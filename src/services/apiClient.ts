@@ -2,7 +2,13 @@ import type { UserPreferences } from '../types';
 
 // Dynamic Mobile & Web Base URL Resolver
 export const getApiBaseUrl = (): string => {
-  // Detect Capacitor Android webview
+  // If explicitly provided via Vite environment variable and not a placeholder, prioritize it
+  const envUrl = import.meta.env.VITE_API_BASE_URL;
+  if (envUrl && !envUrl.includes('YOUR-BACKEND-DOMAIN') && !envUrl.includes('<verified-production-api-host>')) {
+    return envUrl.replace(/\/+$/, '');
+  }
+
+  // Detect Capacitor Android webview or emulator
   const isCapacitor = typeof (window as any)?.Capacitor !== 'undefined';
   const isLocalhostOrigin = window.location.hostname === 'localhost' || window.location.origin.includes('localhost');
   const isAndroidUA = navigator.userAgent.includes('Android');
@@ -12,12 +18,14 @@ export const getApiBaseUrl = (): string => {
     return 'http://10.0.2.2:8000/api/v1';
   }
 
-  // If explicitly provided via Vite environment variable and not a placeholder, use it
-  if (import.meta.env.VITE_API_BASE_URL && !import.meta.env.VITE_API_BASE_URL.includes('YOUR-BACKEND-DOMAIN')) {
-    return import.meta.env.VITE_API_BASE_URL;
+  // Local development fallback
+  if (import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
+    return 'http://127.0.0.1:8000/api/v1';
   }
 
-  return 'http://127.0.0.1:8000/api/v1';
+  // In production on a public domain, if VITE_API_BASE_URL is missing, we must NOT fall back to loopback.
+  // We point to relative API path or surface a configuration notice.
+  return '/api/v1';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -682,10 +690,18 @@ class ApiClient {
     }
 
     const currentBaseUrl = getApiBaseUrl();
-    let response = await fetch(`${currentBaseUrl}${endpoint}`, {
-      ...options,
-      headers,
-    });
+    let response: Response;
+    try {
+      response = await fetch(`${currentBaseUrl}${endpoint}`, {
+        ...options,
+        headers,
+      });
+    } catch (networkErr: any) {
+      console.warn(`[Zynova Network Error] Failed to reach API at ${currentBaseUrl}${endpoint}:`, networkErr);
+      throw new Error(
+        `Unable to connect to server. Please check your internet connection or verify backend configuration. (${networkErr.message || 'NetworkError'})`
+      );
+    }
 
     // If access token expired, try to refresh once automatically
     if (response.status === 401 && this.getRefreshToken()) {
@@ -693,7 +709,7 @@ class ApiClient {
         const refreshed = await this.refreshToken();
         if (refreshed) {
           headers['Authorization'] = `Bearer ${refreshed.access_token}`;
-          response = await fetch(`${this.baseUrl}${endpoint}`, {
+          response = await fetch(`${currentBaseUrl}${endpoint}`, {
             ...options,
             headers,
           });

@@ -85,7 +85,8 @@ try {
     $javaVerOutput = & $JavaExe -version 2>&1 | Out-String
     $ErrorActionPreference = $oldEap
     Write-Host "  Java: $(($javaVerOutput -split "`r?`n")[0].Trim())" -ForegroundColor Gray
-} catch {
+}
+catch {
     Write-Error "Failed to execute Java: $_"
     exit 1
 }
@@ -157,10 +158,12 @@ try {
             if ($LASTEXITCODE -ne 0) {
                 throw "gradlew assembleDebug failed with exit code $LASTEXITCODE"
             }
-        } finally {
+        }
+        finally {
             Pop-Location
         }
-    } else {
+    }
+    else {
         Write-Host "[3-5/9] Skipping Build as requested (-SkipBuild)..." -ForegroundColor Cyan
     }
 
@@ -180,11 +183,9 @@ try {
     
     # Check if any emulator is listed in adb devices
     function Get-ConnectedEmulator {
-        $devOutput = & $AdbExe devices
-        foreach ($line in ($devOutput -split "`r?`n")) {
-            if ($line -match "(emulator-\d+)\s+device\b") {
-                return $Matches[1].Trim()
-            }
+        $devLines = & $AdbExe devices | Where-Object { $_ -match "^\s*emulator-\d+\s+device\b" }
+        if ($devLines) {
+            return ($devLines[0] -split "\s+")[0].Trim()
         }
         return $null
     }
@@ -207,18 +208,17 @@ try {
                 break
             }
             # Check for unauthorized / offline
-            $devOutput = & $AdbExe devices
-            foreach ($line in ($devOutput -split "`r?`n")) {
-                if ($line -match "(emulator-\d+)\s+(offline|unauthorized)\b") {
-                    Write-Host "  Emulator detected in initial state: $($line.Trim())" -ForegroundColor Gray
-                }
+            $offlineLine = & $AdbExe devices | Where-Object { $_ -match "^\s*emulator-\d+\s+(offline|unauthorized)\b" }
+            if ($offlineLine) {
+                Write-Host "  Emulator detected in offline/boot state: $offlineLine" -ForegroundColor Gray
             }
         }
 
         if (-not $serial) {
             throw "Timed out waiting for emulator ($AvdName) to appear in ADB devices."
         }
-    } else {
+    }
+    else {
         Write-Host "Reusing running emulator: $serial" -ForegroundColor Green
     }
 
@@ -227,12 +227,12 @@ try {
     $sw = [System.Diagnostics.Stopwatch]::StartNew()
     $bootCompleted = $false
     while ($sw.Elapsed.TotalSeconds -lt $TimeoutSeconds) {
-        $bootProp = (& $AdbExe -s $serial shell getprop sys.boot_completed 2>$null)
-        if ($bootProp -and ($bootProp.Trim() -eq "1")) {
+        $bootProp = (& $AdbExe -s $serial shell getprop sys.boot_completed 2>$null).Trim()
+        if ($bootProp -eq "1") {
             $bootCompleted = $true
             break
         }
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
     }
 
     if (-not $bootCompleted) {
@@ -252,19 +252,23 @@ try {
         throw "Failed to install APK: $installOutput"
     }
 
-    # Check backend connectivity on host
-    Write-Host "Checking backend status (http://127.0.0.1:8000)..." -ForegroundColor Yellow
-    try {
-        $backendCheck = Invoke-WebRequest -Uri "http://127.0.0.1:8000/api/v1/health" -TimeoutSec 2 -UseBasicParsing -ErrorAction SilentlyContinue
-        if ($backendCheck -and $backendCheck.StatusCode -eq 200) {
-            Write-Host "  Backend: ONLINE on host (http://127.0.0.1:8000) -> mapped to http://10.0.2.2:8000 in emulator" -ForegroundColor Green
-        } else {
-            Write-Host "  Backend: NOT RUNNING on host port 8000 (app will use local mock data / offline state)" -ForegroundColor Gray
-        }
-    } catch {
-        Write-Host "  Backend: NOT RUNNING on host port 8000 (app will use local mock data / offline state)" -ForegroundColor Gray
+    # Launch main activity
+    Write-Host "Launching $MainActivity..." -ForegroundColor Yellow
+    $launchOutput = & $AdbExe -s $serial shell am start -n "$PackageId/$MainActivity" -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>&1 | Out-String
+    Write-Host "  Launch output: $($launchOutput.Trim())" -ForegroundColor Gray
+
+    Start-Sleep -Seconds 4
+
+    # Verify Activity is in foreground
+    $focusedApp = & $AdbExe -s $serial shell dumpsys window | Select-String "mCurrentFocus|mFocusedApp" | Out-String
+    Write-Host "  Current window focus: $($focusedApp.Trim())" -ForegroundColor Gray
+    if ($focusedApp -notmatch $PackageId) {
+        Write-Warning "App $PackageId not confirmed in immediate focus, trying to bring forward..."
+        & $AdbExe -s $serial shell monkey -p $PackageId -c android.intent.category.LAUNCHER 1 2>$null
+        Start-Sleep -Seconds 3
     }
 
+    # 9. Screenshot Artifact Generation & Verification
     # Force stop previous instance for fresh clean launch
     & $AdbExe -s $serial shell am force-stop $PackageId 2>$null
     Start-Sleep -Seconds 1
@@ -275,24 +279,6 @@ try {
     $ErrorActionPreference = "SilentlyContinue"
     $launchOutput = & $AdbExe -s $serial shell am start -n "$PackageId/$MainActivity" -a android.intent.action.MAIN -c android.intent.category.LAUNCHER 2>&1 | Out-String
     $ErrorActionPreference = $oldEap
-    Write-Host "  Launch output: $($launchOutput.Trim())" -ForegroundColor Gray
-
-    # Give WebView time to initialize and render index assets
-    Start-Sleep -Seconds 8
-
-    # Verify Activity is in foreground
-    $focusedApp = & $AdbExe -s $serial shell dumpsys window | Select-String "mCurrentFocus|mFocusedApp" | Out-String
-    Write-Host "  Current window focus: $($focusedApp.Trim())" -ForegroundColor Gray
-
-    # Send a light tap to ensure splash screen dismisses and web view receives focus
-    & $AdbExe -s $serial shell input tap 540 1200 2>$null
-    Start-Sleep -Seconds 3
-
-    # 9. Screenshot Artifact Generation & Verification
-    Write-Host "[9/9] Capturing emulator screen verification..." -ForegroundColor Yellow
-    if (-not (Test-Path -LiteralPath $ArtifactDir)) {
-        New-Item -ItemType Directory -Path $ArtifactDir -Force | Out-Null
-    }
 
     $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
     $screenshotName = "screen_$timestamp.png"
@@ -332,3 +318,4 @@ try {
         Restore-Config
     }
 }
+

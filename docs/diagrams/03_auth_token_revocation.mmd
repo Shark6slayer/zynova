@@ -1,0 +1,35 @@
+sequenceDiagram
+    autonumber
+    actor User as User / Client
+    participant GW as API Gateway (Rate Limiter)
+    participant Auth as Auth Service
+    participant BL as JTI Blacklist Store
+    participant DB as MongoDB (Users)
+
+    Note over User,DB: Login & Token Issuance
+    User->>GW: POST /auth/login (username, password)
+    GW->>Auth: Validate Credentials
+    Auth->>DB: Fetch user record (Argon2id verify)
+    DB-->>Auth: User Validated
+    Auth->>Auth: Generate JWT with unique JTI claim
+    Auth-->>User: 200 OK (Access Token + Refresh Token)
+
+    Note over User,DB: Authenticated Request Inspection
+    User->>GW: GET /chat/conversations (Bearer Token)
+    GW->>BL: Check if JTI is in Blacklist
+    BL-->>GW: Not Blacklisted
+    GW->>Auth: Verify JWT signature & expiration
+    Auth-->>User: 200 OK (Conversations List)
+
+    Note over User,DB: Instant Global Logout / Revocation
+    User->>GW: POST /auth/logout (Bearer Token)
+    GW->>Auth: Process Logout
+    Auth->>BL: Add JTI to Blacklist Store (TTL = Token Expiry)
+    Auth->>DB: Update user.revoked_before = NOW()
+    Auth-->>User: 200 OK (Logged out globally)
+
+    Note over User,DB: Stolen Token Replay Attempt
+    User->>GW: GET /chat/conversations (Reused Stolen Token)
+    GW->>BL: Check JTI in Blacklist
+    BL-->>GW: MATCH FOUND (Blacklisted)
+    GW-->>User: 401 Unauthorized (Token Revoked)

@@ -1,7 +1,9 @@
 from fastapi import Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
+from datetime import datetime, timezone
 from app.core.security import decode_token
+from app.core.token_revocation import is_token_revoked
 from app.database.client import get_database
 from bson import ObjectId
 
@@ -24,6 +26,16 @@ async def get_current_user_payload(
             detail="Invalid or expired access token",
             headers={"WWW-Authenticate": "Bearer"},
         )
+
+    # SEC-06 Revocation check by JTI
+    jti = payload.get("jti")
+    if jti and await is_token_revoked(jti):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Token has been revoked",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
     return payload
 
 async def get_current_user(
@@ -42,6 +54,24 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
+    if not user.get("is_active", True):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
+
+    # Check user-wide session revocation (password reset, account suspension)
+    revoked_before = user.get("tokens_revoked_before")
+    if revoked_before:
+        iat = payload.get("iat")
+        if iat:
+            token_iat = datetime.fromtimestamp(iat, tz=timezone.utc) if isinstance(iat, (int, float)) else iat
+            if revoked_before.tzinfo is None:
+                revoked_before = revoked_before.replace(tzinfo=timezone.utc)
+            if token_iat < revoked_before:
+                raise HTTPException(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    detail="Session has been revoked",
+                    headers={"WWW-Authenticate": "Bearer"},
+                )
+
     user["id"] = str(user["_id"])
     return user
 
@@ -57,12 +87,27 @@ async def get_optional_current_user(
     user_id = payload.get("sub")
     if not user_id:
         return None
+
+    # Check JTI revocation
+    jti = payload.get("jti")
+    if jti and await is_token_revoked(jti):
+        return None
+
     db = get_database()
     if db is None:
         return None
     try:
         user = await db.users.find_one({"_id": ObjectId(user_id)})
-        if user:
+        if user and user.get("is_active", True):
+            revoked_before = user.get("tokens_revoked_before")
+            if revoked_before:
+                iat = payload.get("iat")
+                if iat:
+                    token_iat = datetime.fromtimestamp(iat, tz=timezone.utc) if isinstance(iat, (int, float)) else iat
+                    if revoked_before.tzinfo is None:
+                        revoked_before = revoked_before.replace(tzinfo=timezone.utc)
+                    if token_iat < revoked_before:
+                        return None
             user["id"] = str(user["_id"])
             return user
     except Exception:

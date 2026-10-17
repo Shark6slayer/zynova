@@ -46,3 +46,22 @@ async def version_info():
         "version": settings.APP_VERSION,
         "sovereign_framework": "Indic-FastAPI-v2"
     }
+
+from app.core.rate_limit import get_rate_limiter_health
+from app.core.crypto_kms import get_kms_health
+
+@router.get("/health/security", status_code=status.HTTP_200_OK)
+async def security_health():
+    """Reports status of rate-limiting, token revocation, KMS, and media scanning subsystems without revealing secrets."""
+    rl_health = await get_rate_limiter_health()
+    kms_health = get_kms_health()
+    return {
+        "status": "operational",
+        "rate_limiter": rl_health,
+        "token_revocation": {"status": "operational", "ttl_enabled": True},
+        "kms": kms_health,
+        "media_scanner": {
+            "clamav_configured": bool(settings.CLAMAV_HOST),
+            "environment": settings.ENVIRONMENT
+        }
+    }

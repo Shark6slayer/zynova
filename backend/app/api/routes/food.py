@@ -18,6 +18,7 @@ from app.schemas.all_schemas import (
 from app.database.client import get_database
 from app.api.deps import get_current_user, get_optional_current_user
 from app.core.rate_limit import check_food_order_rate_limit
+from app.core.audit_ledger import record_audit_event
 
 router = APIRouter(prefix="/food", tags=["Food Discovery & Ordering"])
 
@@ -374,6 +375,13 @@ async def cancel_order(
         {"_id": order_obj},
         {"$set": {"order_status": "cancelled", "updated_at": now}}
     )
+
+    await record_audit_event(
+        event_type="ORDER_SECURITY_STATUS_CHANGED",
+        raw_actor_id=current_user["id"],
+        metadata={"order_id": str(order_obj), "category": "food", "old_status": order["order_status"], "new_status": "cancelled"}
+    )
+
     order["order_status"] = "cancelled"
     order["updated_at"] = now
 

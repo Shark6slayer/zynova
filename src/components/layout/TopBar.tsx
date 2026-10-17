@@ -2,6 +2,7 @@ import React from 'react';
 import { 
   Search, Bell, Sparkles, Menu, Palette, LogIn 
 } from 'lucide-react';
+import { ConnectivityBadge } from '../common/ConnectivityBadge';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { t } from '../../i18n';
@@ -50,6 +51,9 @@ export const TopBar: React.FC = () => {
 
       {/* Right Controls */}
       <div className="flex items-center space-x-2 pl-4">
+        {/* Connectivity Status Indicator */}
+        <ConnectivityBadge />
+
         {/* Theme Studio Quick Action */}
         <button
           onClick={() => setActiveModule('customization')}

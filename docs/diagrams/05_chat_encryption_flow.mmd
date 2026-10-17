@@ -1,0 +1,24 @@
+sequenceDiagram
+    autonumber
+    actor Alice as Alice (Client A)
+    participant WS as WebSocket Gateway
+    participant KMS as Envelope Encryption Service
+    participant DB as MongoDB (chat_messages)
+    actor Bob as Bob (Client B)
+
+    Alice->>WS: Send Message Payload {conv_id, recipient, text}
+    WS->>WS: Authorize conversation participation
+    WS->>KMS: Encrypt (plaintext, entity_type="chat", entity_id=conv_id)
+    KMS->>KMS: Derive DEK via HKDF-SHA256 (MasterKey + conv_id context)
+    KMS->>KMS: Encrypt with AES-256-GCM (Generates Nonce + 128-bit Auth Tag)
+    KMS-->>WS: Return Ciphertext + Nonce + Tag + KeyVersion ("v2")
+    
+    WS->>DB: Save to database (Only encrypted ciphertext stored)
+    DB-->>WS: Write Confirmed
+    
+    WS->>Bob: Push realtime payload via WebSocket (Decrypted on flight / secure channel)
+    Bob-->>WS: Acknowledge Receipt
+    WS-->>Alice: Delivery Acknowledgment (Checkmark updated)
+
+    Note over DB,KMS: Ciphertext Transplant Attack Defense
+    Note over DB,KMS: If attacker copies ciphertext to another conversation,<br/>HKDF info mismatch causes AES-GCM tag verification failure.

@@ -1,0 +1,31 @@
+graph LR
+    subgraph PrivateLedger["Private Cryptographic Audit Ledger (MongoDB)"]
+        E1["Event 101<br/>Hash: 0x4a7..."] --> E2["Event 102<br/>Hash: 0x9b2..."]
+        E2 --> E3["Event 103<br/>Hash: 0x1c8..."]
+        E3 --> E100["Event 200<br/>Hash: 0x7f4..."]
+        
+        E100 --> CP["Signed Checkpoint #2<br/>- Seq Range: 101..200<br/>- Merkle Root: 0x3d9...<br/>- Ed25519 Signature"]
+    end
+
+    subgraph AnchorWorker["Asynchronous Anchor Worker"]
+        Verifier["Verify Checkpoint Signature"]
+        Formatter["Format Zero-PII Commitment"]
+    end
+
+    subgraph EVMBlockchain["EVM Blockchain (Simulated / Amoy / Mainnet)"]
+        Contract["SuperAIAuditLedgerAnchor.sol<br/>function submitCheckpoint(<br/>  uint64 seqNumber,<br/>  bytes32 checkpointHash<br/>)"]
+        OnChainEvent["Emit CheckpointAnchored(<br/>  seqNumber, hash, timestamp<br/>)"]
+    end
+
+    CP --> Verifier
+    Verifier --> Formatter
+    Formatter -->|Zero PII Transaction| Contract
+    Contract --> OnChainEvent
+
+    classDef privateStyle fill:#1e293b,stroke:#3b82f6,color:#fff;
+    classDef workerStyle fill:#334155,stroke:#10b981,color:#fff;
+    classDef chainStyle fill:#0f172a,stroke:#8b5cf6,color:#fff;
+
+    class E1,E2,E3,E100,CP privateStyle;
+    class Verifier,Formatter workerStyle;
+    class Contract,OnChainEvent chainStyle;

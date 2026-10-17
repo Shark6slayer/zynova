@@ -5,11 +5,13 @@ import {
   ChevronRight, TrendingUp, Bell, Calendar, Bot, Share2, Video
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { useAuth } from '../../context/AuthContext';
 import { t } from '../../i18n';
 import { MOCK_RESTAURANTS, MOCK_TRANSACTIONS } from '../../mocks/demoData';
 
 export const HomeDashboardView: React.FC = () => {
   const { preferences, activeTheme, setActiveModule } = useApp();
+  const { isAuthenticated, openLoginModal } = useAuth();
   const [quickInput, setQuickInput] = useState('');
 
   const handleQuickAsk = (e: React.FormEvent) => {
@@ -168,24 +170,41 @@ export const HomeDashboardView: React.FC = () => {
               </button>
             </div>
 
-            <div className="space-y-2">
-              {MOCK_TRANSACTIONS.slice(0, 3).map((tx) => (
-                <div key={tx.id} className="p-3 rounded-xl bg-black/5 dark:bg-slate-800/40 border border-white/5 flex items-center justify-between text-xs">
-                  <div className="flex items-center space-x-3">
-                    <div className={`p-2 rounded-lg ${tx.type === 'credit' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>
-                      {tx.type === 'credit' ? '+₹' : '-₹'}
-                    </div>
-                    <div>
-                      <h5 className="font-semibold text-inherit">{tx.title}</h5>
-                      <span className="text-[10px] text-slate-400">{tx.timestamp} • {tx.upiId}</span>
-                    </div>
-                  </div>
-                  <span className={`font-semibold ${tx.type === 'credit' ? 'text-emerald-400' : 'text-inherit'}`}>
-                    {tx.type === 'credit' ? '+' : '-'}₹{tx.amount.toLocaleString('en-IN')}
-                  </span>
+            {isAuthenticated ? (
+              <div className="space-y-2">
+                <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400 pb-1 flex items-center justify-between">
+                  <span>Authorized Account Activity</span>
+                  <span className="text-emerald-400">Encrypted Vault</span>
                 </div>
-              ))}
-            </div>
+                {MOCK_TRANSACTIONS.slice(0, 3).map((tx) => (
+                  <div key={tx.id} className="p-3 rounded-xl bg-black/5 dark:bg-slate-800/40 border border-white/5 flex items-center justify-between text-xs">
+                    <div className="flex items-center space-x-3">
+                      <div className={`p-2 rounded-lg ${tx.type === 'credit' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                        {tx.type === 'credit' ? '+₹' : '-₹'}
+                      </div>
+                      <div>
+                        <h5 className="font-semibold text-inherit">{tx.title}</h5>
+                        <span className="text-[10px] text-slate-400">{tx.timestamp} • {tx.upiId}</span>
+                      </div>
+                    </div>
+                    <span className={`font-semibold ${tx.type === 'credit' ? 'text-emerald-400' : 'text-inherit'}`}>
+                      {tx.type === 'credit' ? '+' : '-'}₹{tx.amount.toLocaleString('en-IN')}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-black/5 dark:bg-slate-800/20 border border-dashed border-white/10 text-center space-y-2">
+                <p className="text-xs text-slate-400">Sign in to view your UPI transaction history and live bank account balances.</p>
+                <button
+                  onClick={openLoginModal}
+                  className="px-4 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm"
+                  style={{ backgroundColor: preferences.accentColor || '#8b5cf6' }}
+                >
+                  Sign In to View
+                </button>
+              </div>
+            )}
           </div>
         </div>
 
@@ -205,7 +224,9 @@ export const HomeDashboardView: React.FC = () => {
                 Drive
               </button>
             </div>
-            <p className="text-xs text-slate-400">{t('cloud.storage_used', preferences.language)}</p>
+            <p className="text-xs text-slate-400">
+              {t('cloud.storage_used', preferences.language, { used: '18.4 GB', total: '100 GB' })}
+            </p>
             <div className="w-full bg-black/10 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
               <div 
                 className="h-2 rounded-full w-[18.4%]" 

@@ -2,7 +2,7 @@ import os
 import uuid
 import aiofiles
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
 from fastapi import (
     APIRouter, HTTPException, status, Depends, Query, 
     UploadFile, File, Form, Request, Header
@@ -19,6 +19,7 @@ from app.schemas.all_schemas import (
 from app.database.client import get_database
 from app.api.deps import get_current_user, get_optional_current_user
 from app.core.rate_limit import check_video_upload_rate_limit, check_video_comment_rate_limit
+from app.core.scanner import scan_quarantined_media, QUARANTINE_DIR
 
 router = APIRouter(prefix="/videos", tags=["Video Platform"])
 
@@ -77,13 +78,14 @@ async def upload_video(
 
     ext = ALLOWED_MIME_TYPES[content_type]
     random_filename = f"{uuid.uuid4().hex}{ext}"
+    quarantine_path = os.path.join(QUARANTINE_DIR, f"quarantine_{random_filename}")
     dest_path = os.path.join(STORAGE_DIR, random_filename)
 
     total_bytes = 0
     header_checked = False
 
     try:
-        async with aiofiles.open(dest_path, "wb") as out_file:
+        async with aiofiles.open(quarantine_path, "wb") as out_file:
             while True:
                 chunk = await file.read(CHUNK_SIZE)
                 if not chunk:
@@ -107,18 +109,31 @@ async def upload_video(
 
                 await out_file.write(chunk)
 
+        # Malware scanning before promotion
+        is_clean, scan_msg = await scan_quarantined_media(quarantine_path, file.filename or random_filename)
+        if not is_clean:
+            if os.path.exists(quarantine_path):
+                try:
+                    os.remove(quarantine_path)
+                except Exception:
+                    pass
+            raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=scan_msg)
+
+        # Atomic promotion from quarantine to active storage
+        os.replace(quarantine_path, dest_path)
+
     except HTTPException:
-        # Cleanup incomplete file on failure
-        if os.path.exists(dest_path):
+        # Cleanup quarantine on failure
+        if os.path.exists(quarantine_path):
             try:
-                os.remove(dest_path)
+                os.remove(quarantine_path)
             except Exception:
                 pass
         raise
     except Exception as e:
-        if os.path.exists(dest_path):
+        if os.path.exists(quarantine_path):
             try:
-                os.remove(dest_path)
+                os.remove(quarantine_path)
             except Exception:
                 pass
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail=f"Storage error: {str(e)}")
@@ -273,7 +288,8 @@ async def get_video_detail(
 async def stream_video(
     video_id: str,
     request: Request,
-    range: Optional[str] = Header(None)
+    range: Optional[str] = Header(None),
+    current_user: Optional[Dict[str, Any]] = Depends(get_optional_current_user)
 ):
     db = get_database()
     if db is None:
@@ -287,6 +303,10 @@ async def stream_video(
     video = await db.videos.find_one({"_id": video_obj})
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    my_id = current_user["id"] if current_user else None
+    if video.get("visibility") == "private" and video.get("owner_id") != my_id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This video is private")
 
     file_path = os.path.join(STORAGE_DIR, video["storage_key"])
     if not os.path.exists(file_path):

@@ -1,0 +1,46 @@
+services:
+  - type: web
+    name: zynova-backend
+    env: python
+    region: oregon
+    plan: free
+    rootDir: backend
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/v1/health
+    autoDeploy: true
+    envVars:
+      - key: ENVIRONMENT
+        value: production
+      - key: APP_NAME
+        value: ZYNOVA_BACKEND
+      - key: APP_VERSION
+        value: 1.0.0
+      - key: DEBUG
+        value: false
+      - key: MONGODB_DB_NAME
+        value: zynova_db
+      - key: MONGODB_URI
+        sync: false
+      - key: JWT_SECRET_KEY
+        generateValue: true
+      - key: JWT_ALGORITHM
+        value: HS256
+      - key: ACCESS_TOKEN_EXPIRE_MINUTES
+        value: 30
+      - key: REFRESH_TOKEN_EXPIRE_DAYS
+        value: 14
+      - key: CORS_ORIGINS
+        value: '["https://zynova.intellidev.in", "http://localhost:5173", "capacitor://localhost"]'
+      - key: KMS_PROVIDER
+        value: local_env
+      - key: MASTER_ENCRYPTION_KEY
+        generateValue: true
+      - key: AUDIT_LEDGER_ENABLED
+        value: true
+      - key: AUDIT_LEDGER_PSEUDONYM_SALT
+        generateValue: true
+      - key: CLAMAV_REQUIRED_IN_PRODUCTION
+        value: false
+      - key: RATE_LIMIT_FAIL_CLOSED_IN_PROD
+        value: false

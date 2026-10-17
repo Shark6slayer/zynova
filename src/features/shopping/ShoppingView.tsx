@@ -4,9 +4,11 @@ import {
   Check, ArrowRight, Zap, ShieldCheck, Plus, Minus, 
   MapPin, CheckCircle2, ChevronRight, X, Loader2, AlertCircle, 
   ArrowLeft, RefreshCw, Receipt, Ban, Package, Truck, Clock, Sparkles,
-  Store, BarChart3, Edit3, Trash2, CheckCircle, AlertTriangle
+  Store, BarChart3, Edit3, Trash2, CheckCircle, AlertTriangle, WifiOff
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useOfflineSync } from '../../context/OfflineSyncContext';
+import { setCachedPublicData, getCachedPublicData } from '../../services/offlineStorage';
 import { 
   apiClient, 
   type ProductResponse, 
@@ -31,6 +33,7 @@ interface CartItem {
 
 export const ShoppingView: React.FC = () => {
   const { user, isAuthenticated, openLoginModal } = useAuth();
+  const { isOnline } = useOfflineSync();
 
   // Active Tab
   const [activeTab, setActiveTab] = useState<'catalog' | 'orders' | 'seller'>('catalog');
@@ -39,6 +42,8 @@ export const ShoppingView: React.FC = () => {
   const [products, setProducts] = useState<ProductResponse[]>([]);
   const [isLoadingProducts, setIsLoadingProducts] = useState(true);
   const [productError, setProductError] = useState<string | null>(null);
+  const [isCachedCatalog, setIsCachedCatalog] = useState<boolean>(false);
+  const [cacheTimestamp, setCacheTimestamp] = useState<number | null>(null);
 
   // Filters & Sorting
   const [selectedCategory, setSelectedCategory] = useState<string>('All');
@@ -117,10 +122,13 @@ export const ShoppingView: React.FC = () => {
     localStorage.setItem('super_ai_shopping_cart', JSON.stringify(cart));
   }, [cart]);
 
-  // Fetch Products
+  // Fetch Products with IndexedDB Cache Fallback (Phase 6)
   const fetchProducts = useCallback(async () => {
     setIsLoadingProducts(true);
     setProductError(null);
+
+    const cacheKey = `catalog:products:${selectedCategory}:${searchQuery}:${priceRange}:${sortOption}`;
+
     try {
       let minPrice: number | undefined;
       let maxPrice: number | undefined;
@@ -142,9 +150,37 @@ export const ShoppingView: React.FC = () => {
         sort: sortOption,
         limit: 30
       });
+
       setProducts(data);
+      setIsCachedCatalog(false);
+      // Cache data locally in IndexedDB for offline access
+      setCachedPublicData(cacheKey, data, 'products').catch((e) => {
+        console.warn('Failed to cache catalog data:', e);
+      });
     } catch (err: any) {
-      setProductError(err.message || 'Failed to load products');
+      // If network/server error or offline, attempt IndexedDB fallback
+      try {
+        const cached = await getCachedPublicData<ProductResponse[]>(cacheKey);
+        if (cached && cached.data && cached.data.length > 0) {
+          setProducts(cached.data);
+          setIsCachedCatalog(true);
+          setCacheTimestamp(cached.cachedAt);
+          setProductError(null);
+        } else {
+          // Attempt generic uncached fallback
+          const genericCached = await getCachedPublicData<ProductResponse[]>('catalog:products:All:::featured');
+          if (genericCached && genericCached.data && genericCached.data.length > 0) {
+            setProducts(genericCached.data);
+            setIsCachedCatalog(true);
+            setCacheTimestamp(genericCached.cachedAt);
+            setProductError(null);
+          } else {
+            setProductError(err.message || 'Offline mode: No cached products available yet. Connect to browse catalog.');
+          }
+        }
+      } catch {
+        setProductError(err.message || 'Failed to load products');
+      }
     } finally {
       setIsLoadingProducts(false);
     }
@@ -575,6 +611,23 @@ export const ShoppingView: React.FC = () => {
               </select>
             </div>
           </div>
+
+          {/* Offline Cached Catalog Warning Notice (Phase 6) */}
+          {isCachedCatalog && (
+            <div className="p-3.5 rounded-2xl bg-amber-500/10 border border-amber-500/25 text-amber-200 text-xs flex items-center justify-between backdrop-blur-md">
+              <div className="flex items-center space-x-2.5">
+                <WifiOff className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  <strong>Cached Catalog Preview:</strong> Displaying offline product catalog. Live connectivity required for real-time stock and checkout.
+                </span>
+              </div>
+              {cacheTimestamp && (
+                <span className="text-[10px] text-amber-400/80 shrink-0 pl-2">
+                  Cached: {new Date(cacheTimestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+                </span>
+              )}
+            </div>
+          )}
 
           {/* Product Grid State Handling */}
           {isLoadingProducts ? (

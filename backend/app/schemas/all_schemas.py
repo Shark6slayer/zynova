@@ -653,3 +653,54 @@ class BillDetailResponse(BaseModel):
     amount_inr: float
     is_test_fixture: bool = True
 
+# Phase 12: Device Identity & Verifiable Security Action Schemas
+class SessionInfoResponse(BaseModel):
+    id: str
+    user_id: str
+    device_label: str
+    client_ip_masked: str
+    user_agent_summary: str
+    created_at: datetime
+    last_activity: datetime
+    is_current: bool = False
+
+class DeviceRegisterPayload(BaseModel):
+    device_label: str = Field(..., min_length=2, max_length=60)
+    public_key_hex: str = Field(..., pattern="^[a-fA-F0-9]{64}$", description="32-byte Ed25519 public key in hex")
+    platform: str = Field("web", pattern="^(android|ios|web|desktop)$")
+    hardware_backed: bool = False
+
+class DeviceResponse(BaseModel):
+    id: str
+    user_id: str
+    device_label: str
+    public_key_hex: str
+    platform: str
+    hardware_backed: bool
+    status: str = "active"  # "active", "revoked"
+    registered_at: datetime
+    last_used_at: Optional[datetime] = None
+
+class ChallengeRequestPayload(BaseModel):
+    action_type: str = Field(..., pattern="^(password_change|revoke_all_sessions|admin_role_change|seller_approval|account_recovery)$")
+    resource_id: Optional[str] = None
+
+class ChallengeResponse(BaseModel):
+    challenge_id: str
+    nonce: str
+    action_type: str
+    resource_id: Optional[str] = None
+    expires_at: datetime
+    issued_at: datetime
+
+class ChallengeVerifyPayload(BaseModel):
+    challenge_id: str
+    device_id: str
+    signature_hex: str = Field(..., description="Ed25519 signature over canonical challenge payload")
+    password: Optional[str] = Field(None, description="Recent password reauthentication (if required)")
+
+class SensitiveActionResponse(BaseModel):
+    status: str = "verified"
+    action_type: str
+    executed_at: datetime
+    audit_sequence: Optional[int] = None

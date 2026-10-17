@@ -18,6 +18,7 @@ from app.schemas.all_schemas import (
 from app.database.client import get_database
 from app.api.deps import get_current_user
 from app.core.rate_limit import check_shopping_order_rate_limit
+from app.core.audit_ledger import record_audit_event
 
 router = APIRouter(prefix="/shopping", tags=["Shopping & E-Commerce"])
 
@@ -478,6 +479,12 @@ async def cancel_shopping_order(
     await db.shopping_orders.update_one(
         {"_id": order["_id"]},
         {"$set": {"order_status": "cancelled", "updated_at": now}}
+    )
+
+    await record_audit_event(
+        event_type="ORDER_SECURITY_STATUS_CHANGED",
+        raw_actor_id=current_user["id"],
+        metadata={"order_id": str(order["_id"]), "old_status": order["order_status"], "new_status": "cancelled"}
     )
 
     # Trigger notification for customer confirming cancellation & stock release

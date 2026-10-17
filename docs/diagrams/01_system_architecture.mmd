@@ -1,0 +1,46 @@
+graph TB
+    subgraph ClientLayer["Client & Edge Layer"]
+        WebApp["React 19 + TypeScript SPA"]
+        MobileApp["Capacitor 8 Android Client (14.2 MB)"]
+        IndexedDBStore[("IndexedDB Local Cache & Drafts")]
+    end
+
+    subgraph GatewayLayer["Gateway & Security Perimeter"]
+        NginxProxy["Nginx Reverse Proxy & TLS 1.3"]
+        RateLimiter["Shared Rate Limiter (Token Bucket)"]
+        TokenBlacklist["JTI Token Revocation Store"]
+    end
+
+    subgraph BackendCore["Application Services (FastAPI / Python 3.13)"]
+        AuthService["Auth & Session Service (Argon2id)"]
+        ChatEngine["Realtime WebSocket Chat Engine"]
+        SocialEngine["Social Feed & Video Platform"]
+        MarketEngine["Zaviro Marketplace & Food (Integer Paise)"]
+        KmsService["AES-256-GCM Envelope KMS (HKDF Context Bound)"]
+        LedgerService["RFC 8785 Immutable Audit Ledger"]
+    end
+
+    subgraph StorageLayer["Data & Trust Layer"]
+        MongoDB[("Authoritative MongoDB 7.0 Cluster")]
+        EVMAnchorNode["EVM Smart Contract (SuperAIAuditLedgerAnchor.sol)"]
+    end
+
+    WebApp <--> NginxProxy
+    MobileApp <--> NginxProxy
+    WebApp <--> IndexedDBStore
+    MobileApp <--> IndexedDBStore
+
+    NginxProxy --> RateLimiter
+    RateLimiter --> TokenBlacklist
+    TokenBlacklist --> AuthService
+    TokenBlacklist --> ChatEngine
+    TokenBlacklist --> SocialEngine
+    TokenBlacklist --> MarketEngine
+
+    AuthService --> MongoDB
+    ChatEngine --> KmsService
+    SocialEngine --> MongoDB
+    MarketEngine --> LedgerService
+    KmsService --> MongoDB
+    LedgerService --> MongoDB
+    LedgerService -.->|Periodic Ed25519 Checkpoints| EVMAnchorNode

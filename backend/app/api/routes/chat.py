@@ -18,6 +18,7 @@ from app.database.client import get_database
 from app.core.rate_limit import check_chat_user_rate_limit
 from app.core.ws_manager import chat_manager
 from app.core.security import decode_token
+from app.core.crypto_kms import encrypt_field, decrypt_field, is_encrypted
 
 router = APIRouter(prefix="/chat", tags=["User Messaging"])
 
@@ -152,12 +153,21 @@ async def list_conversations(
     results = []
     async for room in cursor:
         unread_for_user = room.get("unread_counts", {}).get(current_uid, 0)
+        last_m = room.get("last_message")
+        if last_m and isinstance(last_m, dict):
+            raw_last_text = last_m.get("text", "")
+            if is_encrypted(raw_last_text):
+                conv_id = str(room["_id"])
+                last_m = {
+                    **last_m,
+                    "text": decrypt_field(raw_last_text, context=conv_id)
+                }
         results.append(ChatConversationResponse(
             id=str(room["_id"]),
             type=room.get("type", "direct"),
             participants=room["participants"],
             participant_meta=room.get("participant_meta", {}),
-            last_message=room.get("last_message"),
+            last_message=last_m,
             unread_count=unread_for_user,
             created_at=room.get("created_at", datetime.now(timezone.utc)),
             updated_at=room.get("updated_at", datetime.now(timezone.utc))
@@ -198,6 +208,9 @@ async def get_conversation_messages(
     cursor = db.chat_messages.find(query).sort("created_at", -1).limit(limit)
     messages = []
     async for msg in cursor:
+        raw_text = msg.get("text", "")
+        # Decrypt if encrypted with KMS field-level envelope encryption
+        decrypted_text = decrypt_field(raw_text, context=conversation_id) if is_encrypted(raw_text) else raw_text
         messages.append(ChatMessageResponse(
             id=str(msg["_id"]),
             conversation_id=msg["conversation_id"],
@@ -205,7 +218,7 @@ async def get_conversation_messages(
             sender_username=msg.get("sender_username", ""),
             sender_full_name=msg.get("sender_full_name", ""),
             sender_avatar=msg.get("sender_avatar"),
-            text=msg.get("text", ""),
+            text=decrypted_text,
             created_at=msg["created_at"],
             updated_at=msg.get("updated_at", msg["created_at"]),
             is_edited=msg.get("is_edited", False),
@@ -246,13 +259,17 @@ async def send_message(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message cannot be blank")
 
     now = datetime.now(timezone.utc)
+
+    # Phase 9: Encrypt sensitive message payload at rest using envelope encryption (AES-256-GCM + HKDF)
+    encrypted_payload = encrypt_field(clean_text, context=conversation_id)
+
     msg_doc = {
         "conversation_id": conversation_id,
         "sender_id": current_uid,
         "sender_username": current_user["username"],
         "sender_full_name": current_user["full_name"],
         "sender_avatar": current_user.get("avatar_url"),
-        "text": clean_text,
+        "text": encrypted_payload,
         "created_at": now,
         "updated_at": now,
         "is_edited": False,
@@ -264,10 +281,11 @@ async def send_message(
     msg_id = str(insert_res.inserted_id)
 
     # Update conversation's last_message and unread counts for other participants
+    # Store preview encrypted with context=conversation_id
     last_msg = {
         "id": msg_id,
         "sender_id": current_uid,
-        "text": clean_text[:120],
+        "text": encrypt_field(clean_text[:120], context=conversation_id),
         "created_at": now
     }
 
@@ -358,10 +376,12 @@ async def edit_message(
 
     clean_text = sanitize_text(update_in.text)
     now = datetime.now(timezone.utc)
+    conv_id = msg["conversation_id"]
+    encrypted_edited = encrypt_field(clean_text, context=conv_id)
 
     await db.chat_messages.update_one(
         {"_id": msg_obj},
-        {"$set": {"text": clean_text, "is_edited": True, "updated_at": now}}
+        {"$set": {"text": encrypted_edited, "is_edited": True, "updated_at": now}}
     )
 
     room = await db.chat_rooms.find_one({"_id": ObjectId(msg["conversation_id"])})

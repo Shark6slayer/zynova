@@ -5,6 +5,7 @@ from app.schemas.all_schemas import UserProfileResponse, UserUpdate, AccountDele
 from app.api.deps import get_current_user
 from app.database.client import get_database
 from app.core.security import verify_password
+from app.core.token_revocation import revoke_all_user_sessions
 
 router = APIRouter(prefix="/users", tags=["Users"])
 
@@ -77,7 +78,8 @@ async def delete_my_account(
     user_id = current_user["id"]
 
     # Explicit Cascade Deletion Policy:
-    # 1. Revoke all active refresh tokens
+    # 1. Revoke all active sessions and refresh tokens
+    await revoke_all_user_sessions(user_id, reason="account_deleted")
     await db.refresh_tokens.delete_many({"user_id": user_id})
     # 2. Delete user preferences
     await db.user_preferences.delete_many({"user_id": user_id})
