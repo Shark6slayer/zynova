@@ -18,7 +18,15 @@ async def readiness_check(response: Response):
     """Verifies critical dependencies such as MongoDB."""
     db = get_database()
     mongo_status = "unavailable"
-    
+    if db is None:
+        # Attempt an on-demand reconnect if database is currently disconnected
+        from app.database.client import connect_to_database
+        try:
+            await connect_to_database()
+            db = get_database()
+        except Exception:
+            pass
+
     if db is not None:
         try:
             await db.command("ping")
