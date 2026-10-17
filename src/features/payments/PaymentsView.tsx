@@ -385,33 +385,80 @@ export const PaymentsView: React.FC = () => {
           {/* People & Merchants Circular Grid */}
           <div className="p-5 rounded-3xl bg-slate-900/40 border border-white/5 space-y-3">
             <h3 className="text-xs font-bold text-slate-300 uppercase tracking-wider">Frequent Contacts & Merchants</h3>
-            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3 text-center">
-              {[
-                { name: 'Rahul Sharma', handle: 'rahul@oksbi', avatar: 'R' },
-                { name: 'Priya Patel', handle: 'priya@icici', avatar: 'P' },
-                { name: 'A2B Foods', handle: 'a2b.merchant@hdfc', avatar: 'A' },
-                { name: 'Swiggy', handle: 'swiggy@kotak', avatar: 'S' },
-                { name: 'Aarav', handle: '9876543210', avatar: 'A' },
-                { name: 'Indiranagar Mart', handle: 'indiranagar.store@paytm', avatar: 'I' },
-              ].map((c, i) => (
-                <button
-                  key={i}
-                  onClick={() => {
-                    setRecipientInput(c.handle);
-                    setVerifiedRecipientName(c.name);
-                    setIsSendModalOpen(true);
-                  }}
-                  className="group flex flex-col items-center space-y-1.5 focus:outline-none"
-                >
-                  <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-600 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md group-hover:scale-105 transition">
-                    {c.avatar}
+            {(() => {
+              // Derive verified unique recipients from genuine user transaction history
+              const contactMap = new Map<string, { name: string; handle: string; avatar: string }>();
+              transactions.forEach(tx => {
+                if (tx.recipient_identifier && !contactMap.has(tx.recipient_identifier)) {
+                  const displayName = tx.recipient_name || tx.recipient_identifier;
+                  const initial = (displayName.charAt(0) || 'U').toUpperCase();
+                  contactMap.set(tx.recipient_identifier, {
+                    name: displayName,
+                    handle: tx.recipient_identifier,
+                    avatar: initial
+                  });
+                }
+              });
+              const frequentContacts = Array.from(contactMap.values()).slice(0, 8);
+
+              if (frequentContacts.length === 0) {
+                return (
+                  <div className="py-6 px-4 rounded-2xl bg-slate-800/20 border border-white/5 text-center space-y-2.5">
+                    <p className="text-xs font-medium text-slate-300">
+                      Your frequent contacts will appear here after your first successful payment
+                    </p>
+                    <p className="text-[11px] text-slate-500 max-w-md mx-auto">
+                      Send to a UPI ID, phone number, or scan a QR code to quickly save verified contacts.
+                    </p>
+                    <div className="pt-1 flex items-center justify-center gap-2">
+                      <button
+                        onClick={() => {
+                          setRecipientType('upi_id');
+                          setIsSendModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-cyan-600/80 hover:bg-cyan-600 text-white text-xs font-semibold transition flex items-center gap-1.5"
+                      >
+                        <Send className="w-3.5 h-3.5" />
+                        <span>Send Payment</span>
+                      </button>
+                      <button
+                        onClick={() => {
+                          setRecipientType('merchant');
+                          setIsSendModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 text-slate-300 hover:text-white text-xs font-semibold border border-white/10 transition flex items-center gap-1.5"
+                      >
+                        <QrCode className="w-3.5 h-3.5" />
+                        <span>Scan QR</span>
+                      </button>
+                    </div>
                   </div>
-                  <span className="text-[11px] font-semibold text-slate-300 truncate w-16 group-hover:text-cyan-400">
-                    {c.name}
-                  </span>
-                </button>
-              ))}
-            </div>
+                );
+              }
+
+              return (
+                <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 gap-3 text-center">
+                  {frequentContacts.map((c, i) => (
+                    <button
+                      key={i}
+                      onClick={() => {
+                        setRecipientInput(c.handle);
+                        setVerifiedRecipientName(c.name);
+                        setIsSendModalOpen(true);
+                      }}
+                      className="group flex flex-col items-center space-y-1.5 focus:outline-none"
+                    >
+                      <div className="w-12 h-12 rounded-full bg-gradient-to-tr from-cyan-600 to-indigo-600 flex items-center justify-center text-white font-bold text-sm shadow-md group-hover:scale-105 transition">
+                        {c.avatar}
+                      </div>
+                      <span className="text-[11px] font-semibold text-slate-300 truncate w-16 group-hover:text-cyan-400">
+                        {c.name}
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              );
+            })()}
           </div>
 
           {/* Quick Utility Bill Grid */}
