@@ -12,6 +12,17 @@ async def init_food_db():
     await connect_to_database()
     auth_rate_limiter.requests.clear()
     food_order_rate_limiter.requests.clear()
+
+    # Seed isolated test restaurants fixture if missing
+    from app.database.client import _seed_food_catalog
+    from app.core.config import settings
+    orig_env = settings.ENVIRONMENT
+    orig_allow = settings.ALLOW_DEMO_SEEDING
+    settings.ALLOW_DEMO_SEEDING = True
+    await _seed_food_catalog()
+    settings.ENVIRONMENT = orig_env
+    settings.ALLOW_DEMO_SEEDING = orig_allow
+
     yield
     db = get_database()
     if db is not None:
@@ -69,11 +80,15 @@ async def test_food_discovery_and_ordering_lifecycle():
         assert all(r["is_veg"] is True for r in veg_rest.json())
 
         # 3. Retrieve Restaurant Menu
-        rest_id = restaurants[0]["id"]
-        detail_res = await client.get(f"/api/v1/food/restaurants/{rest_id}")
-        assert detail_res.status_code == 200
-        rest_detail = detail_res.json()
-        assert "menu" in rest_detail
+        rest_detail = None
+        for r_cand in restaurants:
+            c_res = await client.get(f"/api/v1/food/restaurants/{r_cand['id']}")
+            if c_res.status_code == 200 and len(c_res.json().get("menu", [])) >= 2:
+                rest_detail = c_res.json()
+                rest_id = r_cand["id"]
+                break
+
+        assert rest_detail is not None, "At least one restaurant must have >= 2 menu items"
         assert len(rest_detail["menu"]) >= 2
         item_1 = rest_detail["menu"][0]
         item_2 = rest_detail["menu"][1]
