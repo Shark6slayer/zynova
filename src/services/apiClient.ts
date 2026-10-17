@@ -1,5 +1,8 @@
 import type { UserPreferences } from '../types';
 
+// Default production backend endpoint (Render)
+export const PRODUCTION_API_BASE_URL = 'https://zynova-backend-dgpe.onrender.com/api/v1';
+
 // Dynamic Mobile & Web Base URL Resolver
 export const getApiBaseUrl = (): string => {
   // If explicitly provided via Vite environment variable and not a placeholder, prioritize it
@@ -8,10 +11,17 @@ export const getApiBaseUrl = (): string => {
     return envUrl.replace(/\/+$/, '');
   }
 
-  // Detect Capacitor Android webview or emulator
+  // In production builds, never compile or fall back to localhost
+  if (import.meta.env.PROD) {
+    return envUrl && !envUrl.includes('YOUR-BACKEND-DOMAIN')
+      ? envUrl.replace(/\/+$/, '')
+      : PRODUCTION_API_BASE_URL;
+  }
+
+  // Detect Capacitor Android webview or emulator in development
   const isCapacitor = typeof (window as any)?.Capacitor !== 'undefined';
-  const isLocalhostOrigin = window.location.hostname === 'localhost' || window.location.origin.includes('localhost');
-  const isAndroidUA = navigator.userAgent.includes('Android');
+  const isLocalhostOrigin = typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.origin.includes('localhost'));
+  const isAndroidUA = typeof navigator !== 'undefined' && navigator.userAgent.includes('Android');
 
   if (isCapacitor || (isLocalhostOrigin && isAndroidUA)) {
     // Android emulator loopback alias to host machine
@@ -19,13 +29,7 @@ export const getApiBaseUrl = (): string => {
   }
 
   // Local development fallback
-  if (import.meta.env.DEV || window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1') {
-    return 'http://127.0.0.1:8000/api/v1';
-  }
-
-  // In production on a public domain, if VITE_API_BASE_URL is missing, we must NOT fall back to loopback.
-  // We point to relative API path or surface a configuration notice.
-  return '/api/v1';
+  return 'http://127.0.0.1:8000/api/v1';
 };
 
 export const API_BASE_URL = getApiBaseUrl();
@@ -646,11 +650,12 @@ export interface BillDetailResponse {
 }
 
 class ApiClient {
-  private baseUrl: string;
+  public get baseUrl(): string {
+    return getApiBaseUrl();
+  }
 
-
-  constructor(baseUrl: string) {
-    this.baseUrl = baseUrl;
+  constructor(baseUrl?: string) {
+    // Dynamic base URL resolver is used across all requests
   }
 
   public getApiBaseUrl(): string {
