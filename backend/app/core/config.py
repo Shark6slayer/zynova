@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     APP_NAME: str = "SUPER_AI_BACKEND"
     APP_VERSION: str = "1.0.0"
     DEBUG: bool = True
+    ALLOW_DEMO_SEEDING: bool = False
 
     MONGODB_URI: str = "mongodb://127.0.0.1:27017"
     MONGODB_DB_NAME: str = "super_ai_db"

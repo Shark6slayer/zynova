@@ -6,7 +6,6 @@ import {
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
-import { MOCK_USER } from '../../mocks/demoData';
 import { SUPPORTED_LOCALES_LIST, getLanguageMetadata } from '../../i18n';
 import type { AppLanguage } from '../../types';
 
@@ -49,9 +48,9 @@ export const SettingsAccountView: React.FC = () => {
       setBioInput(user.bio || '');
       setAvatarUrlInput(user.avatar_url || '');
     } else {
-      setFullNameInput(MOCK_USER.name);
-      setBioInput(MOCK_USER.bio);
-      setAvatarUrlInput(MOCK_USER.avatar);
+      setFullNameInput('');
+      setBioInput('');
+      setAvatarUrlInput('');
     }
   }, [user]);
 
@@ -81,8 +80,7 @@ export const SettingsAccountView: React.FC = () => {
     }
 
     if (!isAuthenticated) {
-      // Local demo mode update
-      showToast('Profile Updated (Demo Mode)');
+      showToast('Sign in required to save profile');
       setIsEditingProfile(false);
       return;
     }
@@ -125,10 +123,10 @@ export const SettingsAccountView: React.FC = () => {
     }
   };
 
-  const displayedName = user?.full_name || MOCK_USER.name;
-  const displayedHandle = user ? `@${user.username}` : MOCK_USER.handle;
-  const displayedAvatar = user?.avatar_url || MOCK_USER.avatar;
-  const displayedEmail = user?.email || 'guest@superai.in';
+  const displayedName = user?.full_name || (user?.username ? `@${user.username}` : 'Guest User');
+  const displayedHandle = user ? `@${user.username}` : '@guest';
+  const displayedAvatar = user?.avatar_url || '';
+  const displayedEmail = user?.email || 'Not signed in';
 
   return (
     <div className="space-y-6 max-w-4xl mx-auto w-full pb-10">
@@ -157,24 +155,26 @@ export const SettingsAccountView: React.FC = () => {
       <div className="p-6 rounded-2xl bg-slate-900/60 border border-white/10 space-y-4">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
           <div className="flex items-center space-x-4">
-            <img 
-              src={displayedAvatar} 
-              alt={displayedName} 
-              className="w-14 h-14 rounded-full object-cover border-2 border-violet-500/40"
-              onError={(e) => {
-                // Fallback to default avatar if broken
-                (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-              }}
-            />
+            {displayedAvatar ? (
+              <img 
+                src={displayedAvatar} 
+                alt={displayedName} 
+                className="w-14 h-14 rounded-full object-cover border-2 border-violet-500/40"
+              />
+            ) : (
+              <div className="w-14 h-14 rounded-full bg-violet-600/30 border-2 border-violet-500/40 flex items-center justify-center text-lg font-bold text-violet-200">
+                {displayedName.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div>
               <h3 className="text-base font-bold text-white flex items-center gap-1.5">
                 {displayedName}
                 <span className={`text-[10px] px-2 py-0.5 rounded-full font-mono font-semibold ${
                   isAuthenticated 
                     ? 'bg-emerald-500/20 text-emerald-300 border border-emerald-500/30' 
-                    : 'bg-amber-500/20 text-amber-300 border border-amber-500/30'
+                    : 'bg-slate-500/20 text-slate-400 border border-slate-500/30'
                 }`}>
-                  {isAuthenticated ? 'VERIFIED SOVEREIGN ID' : 'GUEST / DEMO MODE'}
+                  {isAuthenticated ? 'VERIFIED SOVEREIGN ID' : 'GUEST SESSION'}
                 </span>
               </h3>
               <p className="text-xs text-slate-400 mt-0.5">{displayedHandle} • {displayedEmail}</p>

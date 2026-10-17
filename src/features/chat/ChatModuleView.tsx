@@ -12,7 +12,6 @@ import {
   type UserPublicSummary 
 } from '../../services/apiClient';
 import { chatWebSocketService } from '../../services/chatWebSocket';
-import { MOCK_USER } from '../../mocks/demoData';
 
 export const ChatModuleView: React.FC = () => {
   const { user, isAuthenticated, openLoginModal } = useAuth();
@@ -331,7 +330,7 @@ export const ChatModuleView: React.FC = () => {
               const otherId = c.participants.find((p) => p !== user?.id);
               const meta = otherId ? c.participant_meta[otherId] : null;
               const name = meta?.full_name || 'Sovereign Contact';
-              const avatar = meta?.avatar_url || MOCK_USER.avatar;
+              const avatar = meta?.avatar_url || '';
               const isActive = activeConversationId === c.id;
 
               return (
@@ -343,14 +342,17 @@ export const ChatModuleView: React.FC = () => {
                   }`}
                 >
                   <div className="relative shrink-0">
-                    <img 
-                      src={avatar} 
-                      alt={name} 
-                      className="w-11 h-11 rounded-full object-cover border border-violet-500/20"
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-                      }}
-                    />
+                    {avatar ? (
+                      <img 
+                        src={avatar} 
+                        alt={name} 
+                        className="w-11 h-11 rounded-full object-cover border border-violet-500/20"
+                      />
+                    ) : (
+                      <div className="w-11 h-11 rounded-full bg-violet-600/30 border border-violet-500/30 flex items-center justify-center text-sm font-bold text-violet-200">
+                        {name.charAt(0).toUpperCase()}
+                      </div>
+                    )}
                     <span className="w-2.5 h-2.5 rounded-full bg-emerald-500 border border-slate-900 absolute bottom-0 right-0" />
                   </div>
                   <div className="flex-1 min-w-0">
@@ -385,14 +387,17 @@ export const ChatModuleView: React.FC = () => {
             {/* Conversation Header */}
             <div className="p-3.5 border-b border-white/10 flex items-center justify-between bg-slate-900/40">
               <div className="flex items-center space-x-3">
-                <img 
-                  src={otherParticipant?.avatar_url || MOCK_USER.avatar} 
-                  alt={otherParticipant?.full_name || 'Contact'} 
-                  className="w-9 h-9 rounded-full object-cover border border-violet-500/30"
-                  onError={(e) => {
-                    (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-                  }}
-                />
+                {otherParticipant?.avatar_url ? (
+                  <img 
+                    src={otherParticipant.avatar_url} 
+                    alt={otherParticipant.full_name || 'Contact'} 
+                    className="w-9 h-9 rounded-full object-cover border border-violet-500/30"
+                  />
+                ) : (
+                  <div className="w-9 h-9 rounded-full bg-violet-600/30 border border-violet-500/30 flex items-center justify-center text-xs font-bold text-violet-200">
+                    {(otherParticipant?.full_name || 'C').charAt(0).toUpperCase()}
+                  </div>
+                )}
                 <div>
                   <h3 className="text-xs font-bold text-white flex items-center gap-1.5">
                     {otherParticipant?.full_name || 'Sovereign Contact'}
@@ -610,14 +615,17 @@ export const ChatModuleView: React.FC = () => {
                     className="flex items-center justify-between p-2.5 rounded-xl hover:bg-white/5 cursor-pointer transition"
                   >
                     <div className="flex items-center space-x-3">
-                      <img
-                        src={usr.avatar_url || MOCK_USER.avatar}
-                        alt={usr.full_name}
-                        className="w-10 h-10 rounded-full object-cover border border-violet-500/30"
-                        onError={(e) => {
-                          (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-                        }}
-                      />
+                      {usr.avatar_url ? (
+                        <img
+                          src={usr.avatar_url}
+                          alt={usr.full_name}
+                          className="w-10 h-10 rounded-full object-cover border border-violet-500/30"
+                        />
+                      ) : (
+                        <div className="w-10 h-10 rounded-full bg-violet-600/30 border border-violet-500/30 flex items-center justify-center text-xs font-bold text-violet-200">
+                          {usr.full_name.charAt(0).toUpperCase()}
+                        </div>
+                      )}
                       <div>
                         <h4 className="text-xs font-semibold text-white">{usr.full_name}</h4>
                         <p className="text-[10px] text-slate-400 font-mono">@{usr.username}</p>

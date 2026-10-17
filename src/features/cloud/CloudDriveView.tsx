@@ -3,15 +3,17 @@ import {
   Cloud, FolderPlus, Upload, FileText, Image, FileSpreadsheet, 
   Trash2, Star, Download, Search, HardDrive 
 } from 'lucide-react';
-import type { CloudFileItem } from '../../mocks/demoData';
+export interface CloudFileItem {
+  id: string;
+  name: string;
+  type: string;
+  size: string;
+  updatedAt: string;
+  isFavorite: boolean;
+}
 
 export const CloudDriveView: React.FC = () => {
-  const [files, setFiles] = useState<CloudFileItem[]>([
-    { id: 'f_1', name: 'Indic_LLM_Tamil_Tokenizer_v2.bin', type: 'code', size: '4.2 GB', updatedAt: 'Today, 09:30 AM', isFavorite: true },
-    { id: 'f_2', name: 'SUPER_AI_Product_Spec_2026.pdf', type: 'pdf', size: '12.4 MB', updatedAt: 'Yesterday', isFavorite: true },
-    { id: 'f_3', name: 'Bangalore_Transit_Survey_Data.xlsx', type: 'spreadsheet', size: '1.8 MB', updatedAt: '12 Oct', isFavorite: false },
-    { id: 'f_4', name: 'Architecture_System_Diagram.png', type: 'image', size: '8.4 MB', updatedAt: '10 Oct', isFavorite: false },
-  ]);
+  const [files, setFiles] = useState<CloudFileItem[]>([]);
 
   const [newFileName, setNewFileName] = useState('');
   const [uploadNotice, setUploadNotice] = useState<string | null>(null);
@@ -87,29 +89,39 @@ export const CloudDriveView: React.FC = () => {
           <span className="text-xs text-slate-400 font-mono">18.4 GB Used / 100 GB</span>
         </div>
 
-        <div className="divide-y divide-white/5">
-          {files.map((file) => (
-            <div key={file.id} className="py-3 flex items-center justify-between text-xs hover:bg-white/5 px-2 rounded-xl transition">
-              <div className="flex items-center space-x-3">
-                <FileText className="w-5 h-5 text-blue-400 shrink-0" />
-                <div>
-                  <h5 className="font-semibold text-slate-200">{file.name}</h5>
-                  <span className="text-[10px] text-slate-400">{file.size} • {file.updatedAt}</span>
+        {files.length > 0 ? (
+          <div className="divide-y divide-white/5">
+            {files.map((file) => (
+              <div key={file.id} className="py-3 flex items-center justify-between text-xs hover:bg-white/5 px-2 rounded-xl transition">
+                <div className="flex items-center space-x-3">
+                  <FileText className="w-5 h-5 text-blue-400 shrink-0" />
+                  <div>
+                    <h5 className="font-semibold text-slate-200">{file.name}</h5>
+                    <span className="text-[10px] text-slate-400">{file.size} • {file.updatedAt}</span>
+                  </div>
+                </div>
+
+                <div className="flex items-center space-x-2 text-slate-400">
+                  <button
+                    onClick={() => handleDelete(file.id)}
+                    className="p-1.5 hover:text-red-400 rounded transition"
+                    title="Delete File"
+                  >
+                    <Trash2 className="w-4 h-4" />
+                  </button>
                 </div>
               </div>
-
-              <div className="flex items-center space-x-2 text-slate-400">
-                <button
-                  onClick={() => handleDelete(file.id)}
-                  className="p-1.5 hover:text-red-400 rounded transition"
-                  title="Delete File"
-                >
-                  <Trash2 className="w-4 h-4" />
-                </button>
-              </div>
-            </div>
-          ))}
-        </div>
+            ))}
+          </div>
+        ) : (
+          <div className="p-8 rounded-xl bg-black/10 dark:bg-slate-800/20 border border-dashed border-white/10 text-center space-y-2">
+            <HardDrive className="w-8 h-8 mx-auto text-slate-500" />
+            <h4 className="text-sm font-semibold text-slate-300">Your Drive is Empty</h4>
+            <p className="text-xs text-slate-400 max-w-sm mx-auto">
+              Save documents, datasets, or code files locally in your encrypted client vault using the form above.
+            </p>
+          </div>
+        )}
       </div>
     </div>
   );

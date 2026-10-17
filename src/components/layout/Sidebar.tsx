@@ -9,7 +9,6 @@ import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import type { NavModuleId, AppearanceMode } from '../../types';
 import { t } from '../../i18n';
-import { MOCK_USER } from '../../mocks/demoData';
 
 interface NavItem {
   id: NavModuleId;
@@ -77,8 +76,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isMobileDrawer, onCloseMobile]);
 
-  const displayedName = user?.full_name || MOCK_USER.name;
-  const displayedAvatar = user?.avatar_url || MOCK_USER.avatar;
+  const displayedName = user?.full_name || user?.username || 'Guest';
+  const displayedAvatar = user?.avatar_url || '';
   const currentAppearance = preferences.appearanceMode || 'system';
 
   return (
@@ -263,14 +262,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
             className="flex items-center justify-between p-2 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition group"
           >
             <div className="flex items-center space-x-2.5 overflow-hidden">
-              <img
-                src={displayedAvatar}
-                alt={displayedName}
-                className="w-7 h-7 rounded-full object-cover border border-white/10 shrink-0"
-                onError={(e) => {
-                  (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-                }}
-              />
+              {displayedAvatar ? (
+                <img
+                  src={displayedAvatar}
+                  alt={displayedName}
+                  className="w-7 h-7 rounded-full object-cover border border-white/10 shrink-0"
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-violet-600/30 border border-violet-500/40 flex items-center justify-center text-[11px] font-bold text-violet-200 shrink-0">
+                  {displayedName.charAt(0).toUpperCase()}
+                </div>
+              )}
               <div className="overflow-hidden">
                 <span className="text-xs font-semibold text-inherit truncate block leading-tight">
                   {displayedName}
@@ -289,14 +291,17 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
             className="flex justify-center p-1.5 rounded-xl hover:bg-black/5 dark:hover:bg-white/5 cursor-pointer transition relative group"
             title="Account Settings"
           >
-            <img
-              src={displayedAvatar}
-              alt={displayedName}
-              className="w-7 h-7 rounded-full object-cover border border-white/10"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-              }}
-            />
+            {displayedAvatar ? (
+              <img
+                src={displayedAvatar}
+                alt={displayedName}
+                className="w-7 h-7 rounded-full object-cover border border-white/10"
+              />
+            ) : (
+              <div className="w-7 h-7 rounded-full bg-violet-600/30 border border-violet-500/40 flex items-center justify-center text-[11px] font-bold text-violet-200">
+                {displayedName.charAt(0).toUpperCase()}
+              </div>
+            )}
             <span className="absolute left-full ml-2 px-2 py-1 bg-slate-900 text-white text-[11px] rounded-lg shadow-xl opacity-0 group-hover:opacity-100 pointer-events-none transition whitespace-nowrap z-50 border border-white/10">
               {displayedName}
             </span>

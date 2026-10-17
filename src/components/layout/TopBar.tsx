@@ -1,12 +1,11 @@
 import React from 'react';
 import { 
-  Search, Bell, Sparkles, Menu, Palette, LogIn 
+  Search, Bell, Sparkles, Menu, Palette, LogIn, User 
 } from 'lucide-react';
 import { ConnectivityBadge } from '../common/ConnectivityBadge';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { t } from '../../i18n';
-import { MOCK_USER } from '../../mocks/demoData';
 
 export const TopBar: React.FC = () => {
   const { 
@@ -19,8 +18,8 @@ export const TopBar: React.FC = () => {
   } = useApp();
   const { user, isAuthenticated, openLoginModal } = useAuth();
 
-  const displayedAvatar = user?.avatar_url || MOCK_USER.avatar;
-  const displayedName = user?.full_name || MOCK_USER.name;
+  const displayedAvatar = user?.avatar_url || '';
+  const displayedName = user?.full_name || user?.username || 'Guest';
 
   return (
     <header className={`h-14 border-b ${activeTheme.borderClass} ${activeTheme.surfaceClass} flex items-center justify-between px-4 z-20 shrink-0`}>
@@ -82,14 +81,17 @@ export const TopBar: React.FC = () => {
             className="flex items-center space-x-2 pl-2 cursor-pointer group"
             title="Account Settings"
           >
-            <img
-              src={displayedAvatar}
-              alt={displayedName}
-              className="w-8 h-8 rounded-full object-cover border border-violet-500/30 group-hover:border-violet-400 transition"
-              onError={(e) => {
-                (e.target as HTMLImageElement).src = MOCK_USER.avatar;
-              }}
-            />
+            {displayedAvatar ? (
+              <img
+                src={displayedAvatar}
+                alt={displayedName}
+                className="w-8 h-8 rounded-full object-cover border border-violet-500/30 group-hover:border-violet-400 transition"
+              />
+            ) : (
+              <div className="w-8 h-8 rounded-full bg-violet-600/30 border border-violet-500/40 flex items-center justify-center text-xs font-bold text-violet-200">
+                {displayedName.charAt(0).toUpperCase()}
+              </div>
+            )}
             <div className="hidden lg:block text-left">
               <span className="text-xs font-semibold text-slate-200 block leading-tight">{displayedName}</span>
               <span className="text-[10px] text-emerald-400 block font-mono font-medium">SOVEREIGN</span>
@@ -106,14 +108,10 @@ export const TopBar: React.FC = () => {
             </button>
             <div
               onClick={() => setActiveModule('settings')}
-              className="cursor-pointer group"
+              className="cursor-pointer group p-1.5 rounded-xl text-slate-400 hover:text-white hover:bg-white/5 transition"
               title="Guest Settings"
             >
-              <img
-                src={MOCK_USER.avatar}
-                alt="Guest"
-                className="w-8 h-8 rounded-full object-cover border border-white/20 group-hover:border-violet-400 transition opacity-70 group-hover:opacity-100"
-              />
+              <User className="w-5 h-5 text-slate-400 group-hover:text-violet-300" />
             </div>
           </div>
         )}
