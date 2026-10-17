@@ -1,8 +1,9 @@
-import React, { createContext, useContext, useState, useEffect, useMemo } from 'react';
+import React, { createContext, useContext, useState, useEffect, useMemo, useCallback } from 'react';
 import type { UserPreferences, NavModuleId, AppearanceMode } from '../types';
 import { THEME_PRESETS, resolveTheme, type ThemeConfig } from '../design-system/themes';
 import { apiClient } from '../services/apiClient';
 import { isRtlLanguage } from '../i18n';
+import { useAuth } from './AuthContext';
 
 interface AppContextType {
   preferences: UserPreferences;
@@ -20,6 +21,9 @@ interface AppContextType {
   setIsMobileNavOpen: (open: boolean) => void;
   unreadNotificationsCount: number;
   setUnreadNotificationsCount: (count: number) => void;
+  unreadChatCount: number;
+  setUnreadChatCount: (count: number) => void;
+  refreshUnreadChatCount: () => Promise<void>;
   syncPreferencesWithServer: () => Promise<void>;
 }
 
@@ -56,6 +60,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);
   const [unreadNotificationsCount, setUnreadNotificationsCount] = useState(0);
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   // Live system dark mode detection
   const [isSystemDark, setIsSystemDark] = useState<boolean>(() => {
@@ -128,8 +133,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     root.setAttribute('dir', dir);
   }, [isDarkEffective, preferences.reducedMotion, preferences.fontSize, preferences.accentColor, preferences.language]);
 
+  const { user } = useAuth();
+
   // Refresh real unread notifications count from backend
-  const refreshUnreadCount = async () => {
+  const refreshUnreadCount = useCallback(async () => {
     if (!apiClient.getToken()) {
       setUnreadNotificationsCount(0);
       return;
@@ -140,10 +147,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       // offline/silent fallback
     }
-  };
+  }, []);
+
+  // Refresh real unread chat count from backend
+  const refreshUnreadChatCount = useCallback(async () => {
+    if (!apiClient.getToken()) {
+      setUnreadChatCount(0);
+      return;
+    }
+    try {
+      const count = await apiClient.getUnreadChatCount();
+      setUnreadChatCount(count);
+    } catch {
+      // offline/silent fallback
+    }
+  }, []);
 
   // Sync preferences with backend if authenticated
-  const syncPreferencesWithServer = async () => {
+  const syncPreferencesWithServer = useCallback(async () => {
     if (!apiClient.getToken()) return;
     try {
       const serverPrefs = await apiClient.getPreferences();
@@ -161,14 +182,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     } catch {
       // Offline fallback: keep local preferences
     }
-  };
-
-  useEffect(() => {
-    syncPreferencesWithServer();
-    refreshUnreadCount();
-    const interval = setInterval(refreshUnreadCount, 15000);
-    return () => clearInterval(interval);
   }, []);
+
+  // Synchronize on authentication state changes (login, logout, user switch)
+  useEffect(() => {
+    if (user) {
+      syncPreferencesWithServer();
+      refreshUnreadCount();
+      refreshUnreadChatCount();
+    } else {
+      setUnreadNotificationsCount(0);
+      setUnreadChatCount(0);
+    }
+  }, [user, syncPreferencesWithServer, refreshUnreadCount, refreshUnreadChatCount]);
+
+  // Periodic polling for unread counters while authenticated
+  useEffect(() => {
+    if (!user) return;
+    const interval = setInterval(() => {
+      refreshUnreadCount();
+      refreshUnreadChatCount();
+    }, 15000);
+    return () => clearInterval(interval);
+  }, [user, refreshUnreadCount, refreshUnreadChatCount]);
 
   const updatePreferences = (updates: Partial<UserPreferences>) => {
     setPreferences((prev) => {
@@ -235,6 +271,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setIsMobileNavOpen,
         unreadNotificationsCount,
         setUnreadNotificationsCount,
+        unreadChatCount,
+        setUnreadChatCount,
+        refreshUnreadChatCount,
         syncPreferencesWithServer,
       }}
     >

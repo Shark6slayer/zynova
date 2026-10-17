@@ -22,7 +22,7 @@ interface NavItem {
 export const NAV_ITEMS: NavItem[] = [
   { id: 'home', label: 'Home', labelKey: 'nav.home', icon: Home, category: 'core' },
   { id: 'search', label: 'Search', labelKey: 'nav.search', icon: Search, category: 'core' },
-  { id: 'chat', label: 'Chat', labelKey: 'nav.chat', icon: MessageSquare, category: 'connect', badge: '3' },
+  { id: 'chat', label: 'Chat', labelKey: 'nav.chat', icon: MessageSquare, category: 'connect' },
   { id: 'social', label: 'Social', labelKey: 'nav.social', icon: Share2, category: 'connect' },
   { id: 'video', label: 'Video', labelKey: 'nav.video', icon: Video, category: 'connect' },
   { id: 'shopping', label: 'Zaviro', labelKey: 'nav.shopping', icon: ShoppingBag, category: 'lifestyle' },
@@ -44,7 +44,8 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
     preferences, 
     updatePreferences, 
     activeTheme, 
-    unreadNotificationsCount 
+    unreadNotificationsCount,
+    unreadChatCount
   } = useApp();
   const { user, isAuthenticated, openLoginModal } = useAuth();
   const sidebarRef = useRef<HTMLElement>(null);
@@ -173,17 +174,30 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
                   </span>
                 )}
 
-                {(!isCompact || isMobileDrawer) && (item.badge || (item.id === 'notifications' && unreadNotificationsCount > 0)) && (
-                  <span
-                    className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono shrink-0 ${
-                      isActive
-                        ? 'bg-white/90 text-slate-900 font-bold'
-                        : 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
-                    }`}
-                  >
-                    {item.id === 'notifications' ? unreadNotificationsCount : item.badge}
-                  </span>
-                )}
+                {(!isCompact || isMobileDrawer) && (() => {
+                  let badgeContent: string | number | null = null;
+                  if (item.id === 'chat' && unreadChatCount > 0) {
+                    badgeContent = unreadChatCount > 99 ? '99+' : unreadChatCount;
+                  } else if (item.id === 'notifications' && unreadNotificationsCount > 0) {
+                    badgeContent = unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount;
+                  } else if (item.badge) {
+                    badgeContent = item.badge;
+                  }
+
+                  if (!badgeContent) return null;
+
+                  return (
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded-full font-mono shrink-0 ${
+                        isActive
+                          ? 'bg-white/90 text-slate-900 font-bold'
+                          : 'bg-violet-500/20 text-violet-400 border border-violet-500/30'
+                      }`}
+                    >
+                      {badgeContent}
+                    </span>
+                  );
+                })()}
 
                 {/* Compact tooltip preview on hover */}
                 {isCompact && !isMobileDrawer && (

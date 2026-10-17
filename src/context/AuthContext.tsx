@@ -64,11 +64,22 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const login = async (payload: LoginPayload) => {
     setIsLoading(true);
+    const t0 = performance.now();
     try {
-      await apiClient.login(payload);
+      const loginRes = await apiClient.login(payload);
+      const tLogin = performance.now();
       const me = await apiClient.getMe();
+      const tMe = performance.now();
       setUser(me);
       setIsAuthModalOpen(false);
+
+      if (typeof window !== 'undefined') {
+        const loginDuration = Math.round(tLogin - t0);
+        const meDuration = Math.round(tMe - tLogin);
+        const totalDuration = Math.round(tMe - t0);
+        // Safe timing instrumentation: measures latency without exposing credentials or tokens
+        console.info(`[AuthTiming] Login request: ${loginDuration}ms | Profile load: ${meDuration}ms | Total auth: ${totalDuration}ms`);
+      }
     } finally {
       setIsLoading(false);
     }
@@ -76,13 +87,25 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const register = async (payload: RegisterPayload) => {
     setIsLoading(true);
+    const t0 = performance.now();
     try {
       await apiClient.register(payload);
+      const tReg = performance.now();
       // Automatically log in after registration
       await apiClient.login({ email: payload.email, password: payload.password });
+      const tLogin = performance.now();
       const me = await apiClient.getMe();
+      const tMe = performance.now();
       setUser(me);
       setIsAuthModalOpen(false);
+
+      if (typeof window !== 'undefined') {
+        const regDuration = Math.round(tReg - t0);
+        const loginDuration = Math.round(tLogin - tReg);
+        const meDuration = Math.round(tMe - tLogin);
+        const totalDuration = Math.round(tMe - t0);
+        console.info(`[AuthTiming] Register: ${regDuration}ms | Login: ${loginDuration}ms | Profile: ${meDuration}ms | Total: ${totalDuration}ms`);
+      }
     } finally {
       setIsLoading(false);
     }

@@ -2,9 +2,11 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { 
   Search, Phone, Video, MoreVertical, Send, Paperclip, 
   Smile, Mic, CheckCheck, Check, Users, Shield, Pin, 
-  Plus, Edit2, Trash2, X, AlertCircle, Loader2, MessageSquare, LogIn 
+  Plus, Edit2, Trash2, X, AlertCircle, Loader2, MessageSquare, LogIn,
+  RefreshCw
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
+import { useApp } from '../../context/AppContext';
 import { 
   apiClient, 
   type ChatConversationResponse, 
@@ -16,12 +18,15 @@ import { chatWebSocketService } from '../../services/chatWebSocket';
 export const ChatModuleView: React.FC = () => {
   const { user, isAuthenticated, openLoginModal } = useAuth();
 
+  const { refreshUnreadChatCount } = useApp();
+
   // State
   const [conversations, setConversations] = useState<ChatConversationResponse[]>([]);
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
   const [messages, setMessages] = useState<ChatMessageResponse[]>([]);
   const [typedMessage, setTypedMessage] = useState('');
   const [isLoadingConversations, setIsLoadingConversations] = useState(false);
+  const [loadConversationsError, setLoadConversationsError] = useState<string | null>(null);
   const [isLoadingMessages, setIsLoadingMessages] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
@@ -37,27 +42,48 @@ export const ChatModuleView: React.FC = () => {
   const [editingText, setEditingText] = useState('');
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  const isMountedRef = useRef(true);
+  const loadingConversationsRef = useRef(false);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
 
-  // Fetch Conversations list
+  // Fetch Conversations list with robust error handling and unmount safety
   const loadConversations = useCallback(async () => {
     if (!isAuthenticated) return;
+    if (loadingConversationsRef.current) return;
+
+    loadingConversationsRef.current = true;
     setIsLoadingConversations(true);
+    setLoadConversationsError(null);
+
     try {
       const rooms = await apiClient.listConversations();
+      if (!isMountedRef.current) return;
       setConversations(rooms);
-      if (rooms.length > 0 && !activeConversationId) {
-        setActiveConversationId(rooms[0].id);
+      setLoadConversationsError(null);
+      if (rooms.length > 0) {
+        setActiveConversationId((currentId) => currentId || rooms[0].id);
       }
-    } catch (err) {
+    } catch (err: any) {
+      if (!isMountedRef.current) return;
       console.warn('Failed to load conversations:', err);
+      setLoadConversationsError(err.message || 'Unable to connect to chat service. Please try again.');
     } finally {
-      setIsLoadingConversations(false);
+      loadingConversationsRef.current = false;
+      if (isMountedRef.current) {
+        setIsLoadingConversations(false);
+      }
     }
-  }, [isAuthenticated, activeConversationId]);
+  }, [isAuthenticated]);
 
   useEffect(() => {
     loadConversations();
@@ -76,13 +102,15 @@ export const ChatModuleView: React.FC = () => {
       setConversations((prev) =>
         prev.map((c) => (c.id === convId ? { ...c, unread_count: 0 } : c))
       );
+      // Refresh dynamic badge in sidebar/context
+      refreshUnreadChatCount().catch(() => {});
     } catch (err) {
       console.warn('Failed to load chat messages:', err);
     } finally {
       setIsLoadingMessages(false);
       setTimeout(scrollToBottom, 100);
     }
-  }, [isAuthenticated]);
+  }, [isAuthenticated, refreshUnreadChatCount]);
 
   useEffect(() => {
     if (activeConversationId) {
@@ -109,7 +137,9 @@ export const ChatModuleView: React.FC = () => {
             return [...prev, message];
           });
           setTimeout(scrollToBottom, 50);
-          apiClient.markConversationRead(conversation_id).catch(() => {});
+          apiClient.markConversationRead(conversation_id)
+            .then(() => refreshUnreadChatCount())
+            .catch(() => {});
         } else {
           // Increment unread count for that conversation
           setConversations((prev) =>
@@ -117,6 +147,8 @@ export const ChatModuleView: React.FC = () => {
               c.id === conversation_id ? { ...c, unread_count: c.unread_count + 1 } : c
             )
           );
+          // Refresh global unread count badge
+          refreshUnreadChatCount().catch(() => {});
         }
 
         // Update last message in conversation list
@@ -320,6 +352,23 @@ export const ChatModuleView: React.FC = () => {
             <div className="p-6 text-center text-slate-400 flex flex-col items-center gap-2">
               <Loader2 className="w-5 h-5 animate-spin text-violet-400" />
               <span className="text-xs">Loading conversations...</span>
+            </div>
+          ) : loadConversationsError && conversations.length === 0 ? (
+            <div className="p-6 text-center flex flex-col items-center gap-3">
+              <div className="w-10 h-10 rounded-full bg-rose-500/10 border border-rose-500/20 flex items-center justify-center text-rose-400">
+                <AlertCircle className="w-5 h-5" />
+              </div>
+              <p className="text-xs text-rose-300 max-w-[200px] leading-relaxed">
+                {loadConversationsError}
+              </p>
+              <button
+                type="button"
+                onClick={() => loadConversations()}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-violet-600 hover:bg-violet-500 text-white text-xs font-medium transition"
+              >
+                <RefreshCw className="w-3.5 h-3.5" />
+                <span>Retry</span>
+              </button>
             </div>
           ) : filteredConversations.length === 0 ? (
             <div className="p-6 text-center text-slate-500 text-xs">

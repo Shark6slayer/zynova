@@ -62,7 +62,6 @@ export const AuthModal: React.FC = () => {
       if (authModalMode === 'login') {
         await login({ email: email.trim(), password });
         setSuccessMsg('Logged in successfully!');
-        await syncPreferencesWithServer();
       } else {
         await register({
           email: email.trim(),
@@ -71,8 +70,18 @@ export const AuthModal: React.FC = () => {
           password,
         });
         setSuccessMsg('Account created and logged in!');
-        await syncPreferencesWithServer();
       }
+
+      // Non-blocking preference synchronization with error isolation and safe latency logging
+      const syncStart = performance.now();
+      syncPreferencesWithServer()
+        .then(() => {
+          const syncDuration = Math.round(performance.now() - syncStart);
+          console.info(`[AuthTiming] Background preference sync completed in ${syncDuration}ms`);
+        })
+        .catch((syncErr) => {
+          console.warn('[AuthTiming] Non-blocking preference synchronization warning:', syncErr?.message || 'Network error');
+        });
     } catch (err: any) {
       setErrorMsg(err.message || 'Authentication failed. Please verify credentials.');
     } finally {
