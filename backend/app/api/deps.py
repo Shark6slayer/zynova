@@ -47,8 +47,13 @@ async def get_current_user(
     
     db = get_database()
     if db is None:
-        # Fallback simulated test mode
-        return {"id": user_id, "email": "dev@superai.in", "username": "ananya_ai", "full_name": "Ananya Sharma"}
+        if settings.ENVIRONMENT.lower() == "production":
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Database service unavailable."
+            )
+        # Development fallback test mode
+        return {"id": user_id, "email": "dev@superai.in", "username": "dev_user", "full_name": "Development User"}
 
     user = await db.users.find_one({"_id": ObjectId(user_id)})
     if not user:

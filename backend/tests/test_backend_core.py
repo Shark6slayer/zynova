@@ -110,3 +110,29 @@ async def test_cors_simple_request_production_origin():
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "https://zynova.intellidev.in"
     assert response.headers.get("access-control-allow-credentials") == "true"
+
+@pytest.mark.asyncio
+async def test_production_startup_skips_demo_seeding(monkeypatch):
+    """Verifies that in production environment without explicit opt-in, catalog seeding is skipped."""
+    from app.core.config import settings
+    from app.database import client
+    
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.setattr(settings, "ALLOW_DEMO_SEEDING", False)
+    
+    # Spy or call directly to verify early return
+    # If seeding ran, it would query the database
+    called = []
+    class DummyDB:
+        def __getattr__(self, name):
+            called.append(name)
+            raise AssertionError(f"Database accessed during production seed check: {name}")
+
+    original_db = client.db_manager.db
+    try:
+        client.db_manager.db = DummyDB()
+        await client._seed_food_catalog()
+        await client._seed_shopping_catalog()
+        assert len(called) == 0, "Seeding attempted database operations despite production environment!"
+    finally:
+        client.db_manager.db = original_db

@@ -1,18 +1,59 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, Search, MessageSquare, Utensils, ShoppingBag, 
   CreditCard, Cloud, ArrowUpRight, CheckCircle2, Clock, 
-  ChevronRight, TrendingUp, Bell, Calendar, Bot, Share2, Video
+  ChevronRight, TrendingUp, Bell, Calendar, Bot, Share2, Video, Loader2
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { t } from '../../i18n';
-import { MOCK_RESTAURANTS, MOCK_TRANSACTIONS } from '../../mocks/demoData';
+import { apiClient, type RestaurantResponse, type PaymentTransactionResponse } from '../../services/apiClient';
 
 export const HomeDashboardView: React.FC = () => {
   const { preferences, activeTheme, setActiveModule } = useApp();
-  const { isAuthenticated, openLoginModal } = useAuth();
+  const { user, isAuthenticated, openLoginModal } = useAuth();
   const [quickInput, setQuickInput] = useState('');
+
+  // Live Backend Data
+  const [restaurants, setRestaurants] = useState<RestaurantResponse[]>([]);
+  const [isLoadingRestaurants, setIsLoadingRestaurants] = useState(false);
+  const [transactions, setTransactions] = useState<PaymentTransactionResponse[]>([]);
+  const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
+
+  useEffect(() => {
+    let isMounted = true;
+    setIsLoadingRestaurants(true);
+    apiClient.listRestaurants()
+      .then((data) => {
+        if (isMounted) setRestaurants(data.slice(0, 2));
+      })
+      .catch((err) => {
+        console.warn('Could not load home restaurants:', err);
+      })
+      .finally(() => {
+        if (isMounted) setIsLoadingRestaurants(false);
+      });
+
+    if (isAuthenticated) {
+      setIsLoadingTransactions(true);
+      apiClient.listPaymentTransactions({ limit: 3 })
+        .then((txs) => {
+          if (isMounted) setTransactions(txs);
+        })
+        .catch((err) => {
+          console.warn('Could not load home transactions:', err);
+        })
+        .finally(() => {
+          if (isMounted) setIsLoadingTransactions(false);
+        });
+    } else {
+      setTransactions([]);
+    }
+
+    return () => {
+      isMounted = false;
+    };
+  }, [isAuthenticated]);
 
   const handleQuickAsk = (e: React.FormEvent) => {
     e.preventDefault();
@@ -31,7 +72,7 @@ export const HomeDashboardView: React.FC = () => {
                 {new Date().toLocaleDateString(preferences.language === 'en' ? 'en-IN' : preferences.language, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </span>
               <h1 className="text-2xl md:text-3xl font-extrabold text-inherit tracking-tight">
-                {t('home.greeting_morning', preferences.language, { name: 'Ananya' })}
+                {t('home.greeting_morning', preferences.language, { name: user?.full_name?.split(' ')[0] || user?.username || 'Sovereign Explorer' })}
               </h1>
             </div>
             <div className="flex items-center space-x-2">
@@ -130,28 +171,53 @@ export const HomeDashboardView: React.FC = () => {
               </button>
             </div>
 
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {MOCK_RESTAURANTS.slice(0, 2).map((r) => (
-                <div
-                  key={r.id}
-                  onClick={() => setActiveModule('food')}
-                  className="p-3 rounded-xl bg-black/5 dark:bg-slate-800/50 hover:bg-black/10 dark:hover:bg-slate-800 border border-white/5 cursor-pointer transition flex items-center space-x-3"
-                >
-                  <img src={r.image} alt={r.name} className="w-16 h-16 rounded-lg object-cover shrink-0" />
-                  <div className="space-y-0.5 overflow-hidden">
-                    <h4 className="text-xs font-semibold text-inherit truncate">{r.name}</h4>
-                    <p className="text-[11px] text-slate-400 truncate">{r.popularDish}</p>
-                    <div className="flex items-center space-x-2 text-[10px] text-slate-400 pt-1">
-                      <span className="text-emerald-400 font-semibold">★ {r.rating}</span>
-                      <span>•</span>
-                      <span>{r.timeMins} mins</span>
-                      <span>•</span>
-                      <span>₹{r.priceForTwo} for two</span>
+            {isLoadingRestaurants ? (
+              <div className="py-8 flex items-center justify-center text-slate-400 gap-2 text-xs">
+                <Loader2 className="w-4 h-4 animate-spin text-orange-400" />
+                <span>Loading restaurants...</span>
+              </div>
+            ) : restaurants.length > 0 ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {restaurants.map((r) => (
+                  <div
+                    key={r.id}
+                    onClick={() => setActiveModule('food')}
+                    className="p-3 rounded-xl bg-black/5 dark:bg-slate-800/50 hover:bg-black/10 dark:hover:bg-slate-800 border border-white/5 cursor-pointer transition flex items-center space-x-3"
+                  >
+                    {r.image_url ? (
+                      <img src={r.image_url} alt={r.name} className="w-16 h-16 rounded-lg object-cover shrink-0" />
+                    ) : (
+                      <div className="w-16 h-16 rounded-lg bg-orange-500/10 border border-orange-500/20 flex items-center justify-center text-orange-400 shrink-0">
+                        <Utensils className="w-6 h-6" />
+                      </div>
+                    )}
+                    <div className="space-y-0.5 overflow-hidden">
+                      <h4 className="text-xs font-semibold text-inherit truncate">{r.name}</h4>
+                      <p className="text-[11px] text-slate-400 truncate">{r.cuisine || r.service_area}</p>
+                      <div className="flex items-center space-x-2 text-[10px] text-slate-400 pt-1">
+                        <span className="text-emerald-400 font-semibold">★ {r.rating.toFixed(1)}</span>
+                        <span>•</span>
+                        <span>{r.time_mins} mins</span>
+                        <span>•</span>
+                        <span>₹{r.price_for_two_inr} for two</span>
+                      </div>
                     </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-6 rounded-xl bg-black/5 dark:bg-slate-800/20 border border-dashed border-white/10 text-center space-y-2">
+                <Utensils className="w-7 h-7 mx-auto text-slate-500" />
+                <p className="text-xs text-slate-400">No restaurants currently listed in your area.</p>
+                <button
+                  onClick={() => setActiveModule('food')}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm"
+                  style={{ backgroundColor: preferences.accentColor || '#8b5cf6' }}
+                >
+                  Explore Food & Dining
+                </button>
+              </div>
+            )}
           </div>
 
           {/* Recent UPI Activity */}
@@ -171,28 +237,47 @@ export const HomeDashboardView: React.FC = () => {
             </div>
 
             {isAuthenticated ? (
-              <div className="space-y-2">
-                <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400 pb-1 flex items-center justify-between">
-                  <span>Authorized Account Activity</span>
-                  <span className="text-emerald-400">Encrypted Vault</span>
+              isLoadingTransactions ? (
+                <div className="py-6 flex items-center justify-center text-slate-400 gap-2 text-xs">
+                  <Loader2 className="w-4 h-4 animate-spin text-cyan-400" />
+                  <span>Loading recent transactions...</span>
                 </div>
-                {MOCK_TRANSACTIONS.slice(0, 3).map((tx) => (
-                  <div key={tx.id} className="p-3 rounded-xl bg-black/5 dark:bg-slate-800/40 border border-white/5 flex items-center justify-between text-xs">
-                    <div className="flex items-center space-x-3">
-                      <div className={`p-2 rounded-lg ${tx.type === 'credit' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>
-                        {tx.type === 'credit' ? '+₹' : '-₹'}
-                      </div>
-                      <div>
-                        <h5 className="font-semibold text-inherit">{tx.title}</h5>
-                        <span className="text-[10px] text-slate-400">{tx.timestamp} • {tx.upiId}</span>
-                      </div>
-                    </div>
-                    <span className={`font-semibold ${tx.type === 'credit' ? 'text-emerald-400' : 'text-inherit'}`}>
-                      {tx.type === 'credit' ? '+' : '-'}₹{tx.amount.toLocaleString('en-IN')}
-                    </span>
+              ) : transactions.length > 0 ? (
+                <div className="space-y-2">
+                  <div className="text-[10px] uppercase font-mono tracking-wider text-slate-400 pb-1 flex items-center justify-between">
+                    <span>Authorized Account Activity</span>
+                    <span className="text-emerald-400">Encrypted Vault</span>
                   </div>
-                ))}
-              </div>
+                  {transactions.map((tx) => (
+                    <div key={tx.id} className="p-3 rounded-xl bg-black/5 dark:bg-slate-800/40 border border-white/5 flex items-center justify-between text-xs">
+                      <div className="flex items-center space-x-3">
+                        <div className={`p-2 rounded-lg ${tx.category === 'p2p' ? 'bg-emerald-500/20 text-emerald-400' : 'bg-slate-500/20 text-slate-400'}`}>
+                          {tx.category === 'p2p' ? '+₹' : '-₹'}
+                        </div>
+                        <div>
+                          <h5 className="font-semibold text-inherit">{tx.recipient_name || tx.transaction_ref}</h5>
+                          <span className="text-[10px] text-slate-400">{new Date(tx.created_at).toLocaleDateString()} • {tx.recipient_identifier || 'UPI Payment'}</span>
+                        </div>
+                      </div>
+                      <span className={`font-semibold ${tx.status === 'success' ? 'text-emerald-400' : 'text-slate-300'}`}>
+                        ₹{(tx.amount_paise / 100).toLocaleString('en-IN', { minimumFractionDigits: 2 })}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="p-6 rounded-xl bg-black/5 dark:bg-slate-800/20 border border-dashed border-white/10 text-center space-y-2">
+                  <CreditCard className="w-6 h-6 mx-auto text-slate-500" />
+                  <p className="text-xs text-slate-400">No payment transactions yet. Transfer funds or pay bills via UPI.</p>
+                  <button
+                    onClick={() => setActiveModule('payments')}
+                    className="px-3 py-1.5 rounded-lg text-xs font-semibold text-white transition shadow-sm"
+                    style={{ backgroundColor: preferences.accentColor || '#8b5cf6' }}
+                  >
+                    Make a Payment
+                  </button>
+                </div>
+              )
             ) : (
               <div className="p-4 rounded-xl bg-black/5 dark:bg-slate-800/20 border border-dashed border-white/10 text-center space-y-2">
                 <p className="text-xs text-slate-400">Sign in to view your UPI transaction history and live bank account balances.</p>

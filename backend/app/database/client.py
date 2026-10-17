@@ -177,6 +177,12 @@ async def _seed_food_catalog() -> None:
     """Seeds verified regional restaurants and menu items if collection is empty."""
     if db_manager.db is None:
         return
+
+    # In production, never auto-seed demo/catalog data unless explicitly opted-in
+    if settings.ENVIRONMENT.lower() == "production" and not getattr(settings, "ALLOW_DEMO_SEEDING", False):
+        logger.info("Skipping food catalog seeding: environment is production and ALLOW_DEMO_SEEDING is disabled.")
+        return
+
     count = await db_manager.db.restaurants.count_documents({})
     if count > 0:
         return
@@ -317,6 +323,12 @@ async def _seed_shopping_catalog() -> None:
     """Seeds verified authentic development seed products if products collection is empty."""
     if db_manager.db is None:
         return
+
+    # In production, never auto-seed demo/catalog data unless explicitly opted-in
+    if settings.ENVIRONMENT.lower() == "production" and not getattr(settings, "ALLOW_DEMO_SEEDING", False):
+        logger.info("Skipping shopping catalog seeding: environment is production and ALLOW_DEMO_SEEDING is disabled.")
+        return
+
     count = await db_manager.db.products.count_documents({})
     if count > 0:
         return
