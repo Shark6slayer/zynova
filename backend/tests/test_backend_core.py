@@ -153,8 +153,45 @@ async def test_cors_preflight_production_origin():
         )
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "https://zynova.intellidev.in"
+    assert response.headers.get("access-control-allow-origin") != "*"
     assert response.headers.get("access-control-allow-credentials") == "true"
     assert "GET" in response.headers.get("access-control-allow-methods", "")
+
+@pytest.mark.asyncio
+async def test_cors_preflight_approved_preview_origin():
+    """Verifies that CORS preflight from approved Vercel preview origin succeeds with exact origin and credentials."""
+    preview_origin = "https://zynovaapp-git-deployment-atlas-vercel-karuppusamy2.vercel.app"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.options(
+            "/api/v1/health",
+            headers={
+                "Origin": preview_origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type"
+            }
+        )
+    assert response.status_code == 200
+    assert response.headers.get("access-control-allow-origin") == preview_origin
+    assert response.headers.get("access-control-allow-origin") != "*"
+    assert response.headers.get("access-control-allow-credentials") == "true"
+    assert "GET" in response.headers.get("access-control-allow-methods", "")
+
+@pytest.mark.asyncio
+async def test_cors_preflight_unapproved_origin_fails_closed():
+    """Verifies that CORS preflight from unapproved/arbitrary origin is rejected with HTTP 400."""
+    unapproved_origin = "https://malicious-site.example.com"
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
+        response = await ac.options(
+            "/api/v1/health",
+            headers={
+                "Origin": unapproved_origin,
+                "Access-Control-Request-Method": "GET",
+                "Access-Control-Request-Headers": "authorization,content-type"
+            }
+        )
+    assert response.status_code == 400
+    assert response.text == "Disallowed CORS origin"
+    assert "access-control-allow-origin" not in response.headers
 
 @pytest.mark.asyncio
 async def test_cors_simple_request_production_origin():
@@ -166,6 +203,7 @@ async def test_cors_simple_request_production_origin():
         )
     assert response.status_code == 200
     assert response.headers.get("access-control-allow-origin") == "https://zynova.intellidev.in"
+    assert response.headers.get("access-control-allow-origin") != "*"
     assert response.headers.get("access-control-allow-credentials") == "true"
 
 @pytest.mark.asyncio
@@ -193,3 +231,45 @@ async def test_production_startup_skips_demo_seeding(monkeypatch):
         assert len(called) == 0, "Seeding attempted database operations despite production environment!"
     finally:
         client.db_manager.db = original_db
+
+@pytest.mark.asyncio
+async def test_production_payment_balance_never_synthetic(monkeypatch):
+    """Verifies that in production mode, check_bank_balance never returns synthetic balances."""
+    from app.services.payment_provider import PaymentProviderInterface
+
+    monkeypatch.setenv("PAYMENTS_LIVE_MODE", "true")
+    provider = PaymentProviderInterface()
+    assert provider.is_production is True
+
+    result = await provider.check_bank_balance("State Bank of India", "••••••••1234")
+    assert result["status"] == "unsupported"
+    assert result["balance_paise"] is None
+    assert result["balance_inr"] is None
+    assert result["is_test_fixture"] is False
+    assert "Live Account Aggregator" in result["reason"]
+
+@pytest.mark.asyncio
+async def test_environment_production_enforces_payment_safety(monkeypatch):
+    """Verifies that ENVIRONMENT=production enforces is_production=True even without PAYMENTS_LIVE_MODE."""
+    from app.services.payment_provider import PaymentProviderInterface
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "ENVIRONMENT", "production")
+    monkeypatch.delenv("PAYMENTS_LIVE_MODE", raising=False)
+    provider = PaymentProviderInterface()
+    assert provider.is_production is True
+    res = await provider.check_bank_balance("HDFC Bank", "••••••••5678")
+    assert res["status"] == "unsupported"
+    assert res["balance_paise"] is None
+    assert res["is_test_fixture"] is False
+
+@pytest.mark.asyncio
+async def test_payment_webhook_fails_closed_when_secret_missing(monkeypatch):
+    """Verifies that webhook signature verification fails closed if secret is not set."""
+    from app.services.payment_provider import payment_provider
+
+    monkeypatch.delenv("PAYMENTS_WEBHOOK_SECRET", raising=False)
+    payload = b'{"event": "payment.success"}'
+    fake_sig = "a" * 64
+    assert payment_provider.verify_webhook_signature(payload, fake_sig) is False
+    assert payment_provider.verify_webhook_signature(payload, "") is False

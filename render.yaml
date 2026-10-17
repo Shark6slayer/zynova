@@ -31,7 +31,7 @@ services:
       - key: REFRESH_TOKEN_EXPIRE_DAYS
         value: 14
       - key: CORS_ORIGINS
-        value: '["https://zynova.intellidev.in", "http://localhost:5173", "capacitor://localhost"]'
+        value: '["https://zynova.intellidev.in", "https://zynovaapp-git-deployment-atlas-vercel-karuppusamy2.vercel.app", "http://localhost:5173", "capacitor://localhost"]'
       - key: KMS_PROVIDER
         value: local_env
       - key: MASTER_ENCRYPTION_KEY
