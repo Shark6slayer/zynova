@@ -68,11 +68,11 @@ export const ShoppingView: React.FC = () => {
   const [cartAlert, setCartAlert] = useState<string | null>(null);
 
   // Checkout Form State
-  const [shippingFullName, setShippingFullName] = useState(user?.full_name || 'Karthik Rao');
-  const [shippingPhone, setShippingPhone] = useState('+919876543210');
-  const [shippingAddress, setShippingAddress] = useState('Flat 402, Highrise Heights, 100ft Road, Indiranagar');
-  const [shippingCity, setShippingCity] = useState('Bengaluru');
-  const [shippingPostalCode, setShippingPostalCode] = useState('560038');
+  const [shippingFullName, setShippingFullName] = useState(user?.full_name || '');
+  const [shippingPhone, setShippingPhone] = useState('');
+  const [shippingAddress, setShippingAddress] = useState('');
+  const [shippingCity, setShippingCity] = useState('');
+  const [shippingPostalCode, setShippingPostalCode] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'test_mode_upi' | 'test_mode_card'>('cod');
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [checkoutError, setCheckoutError] = useState<string | null>(null);
@@ -96,12 +96,12 @@ export const ShoppingView: React.FC = () => {
   // Seller Onboarding Form
   const [bizName, setBizName] = useState('');
   const [bizCategory, setBizCategory] = useState('Electronics');
-  const [bizPhone, setBizPhone] = useState('+919876543299');
-  const [bizAddress, setBizAddress] = useState('88 Merchant Lane, Indiranagar');
-  const [bizCity, setBizCity] = useState('Bengaluru');
-  const [bizState, setBizState] = useState('Karnataka');
-  const [bizPincode, setBizPincode] = useState('560038');
-  const [bizGstin, setBizGstin] = useState('29ABCDE1234F1Z5');
+  const [bizPhone, setBizPhone] = useState('');
+  const [bizAddress, setBizAddress] = useState('');
+  const [bizCity, setBizCity] = useState('');
+  const [bizState, setBizState] = useState('');
+  const [bizPincode, setBizPincode] = useState('');
+  const [bizGstin, setBizGstin] = useState('');
 
   // Seller New Product Modal Form
   const [isProductModalOpen, setIsProductModalOpen] = useState(false);

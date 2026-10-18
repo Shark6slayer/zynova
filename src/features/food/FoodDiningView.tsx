@@ -57,9 +57,7 @@ export const FoodDiningView: React.FC = () => {
   });
 
   // Delivery address & checkout
-  const [deliveryAddress, setDeliveryAddress] = useState(
-    'Flat 402, Embassy Habitat, 100ft Road, HAL 2nd Stage, Indiranagar, Bengaluru, 560038'
-  );
+  const [deliveryAddress, setDeliveryAddress] = useState('');
   const [paymentMethod, setPaymentMethod] = useState<'cod' | 'test_mode_upi' | 'test_mode_card'>('cod');
   const [isPlacingOrder, setIsPlacingOrder] = useState(false);
   const [lastPlacedOrder, setLastPlacedOrder] = useState<FoodOrderResponse | null>(null);
@@ -148,9 +146,9 @@ export const FoodDiningView: React.FC = () => {
   // Restaurant Registration Form
   const [rFormName, setRFormName] = useState('');
   const [rFormDesc, setRFormDesc] = useState('');
-  const [rFormArea, setRFormArea] = useState('Indiranagar');
-  const [rFormAddress, setRFormAddress] = useState('100ft Road, Indiranagar, Bengaluru');
-  const [rFormCuisine, setRFormCuisine] = useState('South Indian, Biryani');
+  const [rFormArea, setRFormArea] = useState('');
+  const [rFormAddress, setRFormAddress] = useState('');
+  const [rFormCuisine, setRFormCuisine] = useState('');
   const [rFormPriceForTwo, setRFormPriceForTwo] = useState('500');
   const [rFormIsVeg, setRFormIsVeg] = useState(false);
 
@@ -438,12 +436,12 @@ export const FoodDiningView: React.FC = () => {
         <div>
           <div className="flex items-center space-x-2 text-orange-400 text-xs font-semibold uppercase tracking-wider">
             <Utensils className="w-4 h-4" />
-            <span>Indiranagar Delivery Zone • Bangalore</span>
+            <span>Food & Dining Delivery Network</span>
           </div>
           <h1 className="text-2xl font-bold text-white tracking-tight mt-1">SUPER_AI Food & Dining</h1>
           <p className="text-xs text-slate-400 mt-1 flex items-center gap-1">
             <MapPin className="w-3.5 h-3.5 text-violet-400" />
-            <span>Serving HAL 2nd Stage, CMH Road, 100ft Road & surrounding areas</span>
+            <span>Serving fresh local kitchens and neighborhood restaurants</span>
           </p>
         </div>
 
@@ -520,7 +518,7 @@ export const FoodDiningView: React.FC = () => {
             <div className="p-8 text-center bg-slate-900/40 border border-white/5 rounded-2xl space-y-2">
               <ShoppingBag className="w-8 h-8 text-slate-500 mx-auto" />
               <p className="text-sm font-semibold text-slate-300">No orders placed yet</p>
-              <p className="text-xs text-slate-500">Explore authentic Indiranagar eateries and order freshly prepared meals.</p>
+              <p className="text-xs text-slate-500">Explore authentic local eateries and order freshly prepared meals.</p>
               <button
                 onClick={() => setActiveTab('browse')}
                 className="mt-2 px-4 py-1.5 bg-orange-600 text-white rounded-xl text-xs font-semibold hover:bg-orange-500 transition"

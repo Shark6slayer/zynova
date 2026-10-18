@@ -15,7 +15,7 @@ export const CommandPalette: React.FC = () => {
   const actions: Array<{ title: string; category: string; icon: any; action: () => void }> = [
     { title: 'Open Universal AI Copilot', category: 'Navigation', icon: Bot, action: () => setActiveModule('ai-assistant') },
     { title: 'Universal Web & Research Search', category: 'Navigation', icon: Search, action: () => setActiveModule('search') },
-    { title: 'Food & Dining (Indiranagar)', category: 'Lifestyle', icon: Utensils, action: () => setActiveModule('food') },
+    { title: 'Food & Dining', category: 'Lifestyle', icon: Utensils, action: () => setActiveModule('food') },
     { title: 'UPI 2.0 & Payments Ledger', category: 'Finance', icon: CreditCard, action: () => setActiveModule('payments') },
     { title: 'Super Mall ONDC Marketplace', category: 'Shopping', icon: ShoppingBag, action: () => setActiveModule('shopping') },
     { title: 'Global Customization Studio', category: 'System', icon: Palette, action: () => setActiveModule('customization') },

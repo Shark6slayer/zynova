@@ -2,12 +2,19 @@ import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, Search, MessageSquare, Utensils, ShoppingBag, 
   CreditCard, Cloud, ArrowUpRight, CheckCircle2, Clock, 
-  ChevronRight, TrendingUp, Bell, Calendar, Bot, Share2, Video, Loader2
+  ChevronRight, TrendingUp, Bell, Calendar, Bot, Share2, Video, Loader2, MapPin
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { t } from '../../i18n';
 import { apiClient, type RestaurantResponse, type PaymentTransactionResponse } from '../../services/apiClient';
+
+interface WeatherState {
+  status: 'loading' | 'success' | 'permission_denied' | 'unavailable';
+  temp?: number;
+  condition?: string;
+  locationName?: string;
+}
 
 export const HomeDashboardView: React.FC = () => {
   const { preferences, activeTheme, setActiveModule } = useApp();
@@ -20,8 +27,95 @@ export const HomeDashboardView: React.FC = () => {
   const [transactions, setTransactions] = useState<PaymentTransactionResponse[]>([]);
   const [isLoadingTransactions, setIsLoadingTransactions] = useState(false);
 
+  // Weather state (live with honest empty/error states)
+  const [weather, setWeather] = useState<WeatherState>({ status: 'loading' });
+
+  // Sovereign Cloud local storage size
+  const [cloudFileCount, setCloudFileCount] = useState<number>(0);
+
+  // User-scoped isolated tasks
+  const [tasks, setTasks] = useState<Array<{ id: string; title: string; completed: boolean; dueDate?: string }>>([]);
+
+  // Dynamic Time-of-Day Greeting Key
+  const getGreetingKey = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'home.greeting_morning';
+    if (hour >= 12 && hour < 17) return 'home.greeting_afternoon';
+    return 'home.greeting_evening';
+  };
+
   useEffect(() => {
     let isMounted = true;
+
+    // Load actual local vault file count (user-isolated)
+    const fileStorageKey = user ? `super_ai_local_files_${user.id}` : 'super_ai_local_files_guest';
+    try {
+      const savedFiles = localStorage.getItem(fileStorageKey);
+      if (savedFiles) {
+        const parsed = JSON.parse(savedFiles);
+        if (Array.isArray(parsed) && isMounted) {
+          setCloudFileCount(parsed.length);
+        }
+      } else if (isMounted) {
+        setCloudFileCount(0);
+      }
+    } catch {
+      if (isMounted) setCloudFileCount(0);
+    }
+
+    // Load actual user tasks
+    const taskStorageKey = user ? `super_ai_workspace_tasks_${user.id}` : 'super_ai_workspace_tasks_guest';
+    try {
+      const savedTasks = localStorage.getItem(taskStorageKey);
+      if (savedTasks) {
+        const parsed = JSON.parse(savedTasks);
+        if (Array.isArray(parsed) && isMounted) {
+          setTasks(parsed);
+        }
+      } else if (isMounted) {
+        setTasks([]);
+      }
+    } catch {
+      if (isMounted) setTasks([]);
+    }
+
+    // Fetch live weather using browser geolocation + Open-Meteo or fallback honestly
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        async (position) => {
+          if (!isMounted) return;
+          try {
+            const { latitude, longitude } = position.coords;
+            const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`);
+            if (!res.ok) throw new Error('Weather API error');
+            const data = await res.json();
+            if (isMounted && data.current) {
+              const temp = Math.round(data.current.temperature_2m);
+              setWeather({
+                status: 'success',
+                temp,
+                condition: temp > 28 ? 'Warm' : temp < 15 ? 'Cool' : 'Pleasant',
+                locationName: 'Local Climate'
+              });
+            }
+          } catch {
+            if (isMounted) setWeather({ status: 'unavailable', locationName: 'Weather unavailable' });
+          }
+        },
+        (error) => {
+          if (!isMounted) return;
+          if (error.code === error.PERMISSION_DENIED) {
+            setWeather({ status: 'permission_denied', locationName: 'Location disabled' });
+          } else {
+            setWeather({ status: 'unavailable', locationName: 'Weather unavailable' });
+          }
+        },
+        { timeout: 6000, maximumAge: 300000 }
+      );
+    } else {
+      setWeather({ status: 'unavailable', locationName: 'Weather unsupported' });
+    }
+
     setIsLoadingRestaurants(true);
     apiClient.listRestaurants()
       .then((data) => {
@@ -53,7 +147,7 @@ export const HomeDashboardView: React.FC = () => {
     return () => {
       isMounted = false;
     };
-  }, [isAuthenticated]);
+  }, [isAuthenticated, user]);
 
   const handleQuickAsk = (e: React.FormEvent) => {
     e.preventDefault();
@@ -72,14 +166,31 @@ export const HomeDashboardView: React.FC = () => {
                 {new Date().toLocaleDateString(preferences.language === 'en' ? 'en-IN' : preferences.language, { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' })}
               </span>
               <h1 className="text-2xl md:text-3xl font-extrabold text-inherit tracking-tight">
-                {t('home.greeting_morning', preferences.language, { name: user?.full_name?.split(' ')[0] || user?.username || 'Sovereign Explorer' })}
+                {t(getGreetingKey(), preferences.language, { name: user?.full_name?.split(' ')[0] || user?.username || 'Sovereign Explorer' })}
               </h1>
             </div>
             <div className="flex items-center space-x-2">
-              <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                Bengaluru 24°C • Pleasant
-              </span>
+              {weather.status === 'success' ? (
+                <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                  {weather.locationName} {weather.temp}°C • {weather.condition}
+                </span>
+              ) : weather.status === 'loading' ? (
+                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
+                  <Loader2 className="w-3 h-3 animate-spin" />
+                  Updating climate...
+                </span>
+              ) : weather.status === 'permission_denied' ? (
+                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
+                  <MapPin className="w-3 h-3" />
+                  Location access off
+                </span>
+              ) : (
+                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
+                  <Cloud className="w-3 h-3" />
+                  Climate unavailable
+                </span>
+              )}
             </div>
           </div>
 
@@ -160,7 +271,7 @@ export const HomeDashboardView: React.FC = () => {
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <Utensils className="w-4 h-4 text-orange-400" />
-                <h3 className="text-sm font-bold text-inherit">Popular Around Indiranagar</h3>
+                <h3 className="text-sm font-bold text-inherit">Popular Restaurants</h3>
               </div>
               <button
                 onClick={() => setActiveModule('food')}
@@ -295,32 +406,37 @@ export const HomeDashboardView: React.FC = () => {
 
         {/* Right Column: Sovereign Cloud & Quick Priorities */}
         <div className="space-y-6">
-          {/* Cloud Usage Widget */}
+          {/* Client Vault Widget */}
           <div className={`p-5 rounded-2xl border ${activeTheme.borderClass} ${activeTheme.surfaceClass} space-y-3 shadow-sm`}>
             <div className="flex items-center justify-between">
               <h3 className="text-sm font-bold text-inherit flex items-center gap-2">
-                <Cloud className="w-4 h-4 text-blue-400" /> Sovereign Cloud
+                <Cloud className="w-4 h-4 text-cyan-400" /> Client Vault & Storage
               </h3>
               <button
                 onClick={() => setActiveModule('cloud')}
                 className="text-xs hover:underline font-medium"
                 style={{ color: preferences.accentColor || '#8b5cf6' }}
               >
-                Drive
+                Vault
               </button>
             </div>
             <p className="text-xs text-slate-400">
-              {t('cloud.storage_used', preferences.language, { used: '18.4 GB', total: '100 GB' })}
+              {cloudFileCount === 0
+                ? '0 local files stored (~0 MB) • Cloud unattached'
+                : `${cloudFileCount} local ${cloudFileCount === 1 ? 'file' : 'files'} (~${(cloudFileCount * 2.4).toFixed(1)} MB) • Cloud unattached`}
             </p>
             <div className="w-full bg-black/10 dark:bg-slate-800 rounded-full h-2 overflow-hidden">
-              <div 
-                className="h-2 rounded-full w-[18.4%]" 
-                style={{ background: `linear-gradient(to right, #3b82f6, ${preferences.accentColor || '#8b5cf6'})` }}
+              <div
+                className="h-2 rounded-full"
+                style={{
+                  width: `${cloudFileCount > 0 ? Math.min(100, Math.max(cloudFileCount * 10, 4)) : 0}%`,
+                  background: `linear-gradient(to right, #06b6d4, ${preferences.accentColor || '#8b5cf6'})`
+                }}
               />
             </div>
             <div className="flex justify-between text-[11px] text-slate-400 pt-1">
-              <span>Local client vault</span>
-              <span>Encrypted</span>
+              <span>{user ? `Account: ${user.username}` : 'Guest session'}</span>
+              <span className="text-amber-400/90 font-mono text-[10px]">Local only</span>
             </div>
           </div>
 
@@ -338,21 +454,30 @@ export const HomeDashboardView: React.FC = () => {
                 Notifications
               </button>
             </div>
-            <div className="space-y-2 text-xs">
-              {[
-                { task: 'Review Indic language model benchmarks', time: '2:00 PM', done: false },
-                { task: 'Explore Zaviro curated electronics catalog', time: '4:30 PM', done: true },
-                { task: 'Family dinner reservation at Truffles', time: '7:30 PM', done: false },
-              ].map((item, idx) => (
-                <div key={idx} className="flex items-center space-x-2.5 p-2 rounded-lg bg-black/5 dark:bg-slate-800/30">
-                  <CheckCircle2 className={`w-4 h-4 ${item.done ? 'text-emerald-400' : 'text-slate-400'}`} />
-                  <span className={`flex-1 ${item.done ? 'line-through text-slate-400' : 'text-inherit'}`}>
-                    {item.task}
-                  </span>
-                  <span className="text-[10px] text-slate-400">{item.time}</span>
-                </div>
-              ))}
-            </div>
+            {tasks.length > 0 ? (
+              <div className="space-y-2 text-xs">
+                {tasks.slice(0, 4).map((item) => (
+                  <div key={item.id} className="flex items-center space-x-2.5 p-2 rounded-lg bg-black/5 dark:bg-slate-800/30">
+                    <CheckCircle2 className={`w-4 h-4 ${item.completed ? 'text-emerald-400' : 'text-slate-400'}`} />
+                    <span className={`flex-1 ${item.completed ? 'line-through text-slate-400' : 'text-inherit'}`}>
+                      {item.title}
+                    </span>
+                    {item.dueDate && <span className="text-[10px] text-slate-400">{item.dueDate}</span>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="p-4 rounded-xl bg-black/5 dark:bg-slate-800/20 border border-dashed border-white/10 text-center space-y-2">
+                <p className="text-xs text-slate-400">No pending priorities recorded.</p>
+                <button
+                  onClick={() => setActiveModule('notifications')}
+                  className="px-3 py-1 rounded-lg text-xs font-semibold text-white transition shadow-sm"
+                  style={{ backgroundColor: preferences.accentColor || '#8b5cf6' }}
+                >
+                  View Alerts
+                </button>
+              </div>
+            )}
           </div>
         </div>
       </div>
