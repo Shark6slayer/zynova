@@ -62,6 +62,38 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     refreshSession();
   }, [refreshSession]);
 
+  // Helper to parse claims from JWT token safely without external library
+  const parseTokenUser = (token: string): UserProfileResponse | null => {
+    try {
+      const parts = token.split('.');
+      if (parts.length < 2) return null;
+      const base64Url = parts[1];
+      const base64 = base64Url.replace(/-/g, '+').replace(/_/g, '/');
+      const jsonPayload = decodeURIComponent(
+        atob(base64)
+          .split('')
+          .map((c) => '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2))
+          .join('')
+      );
+      const parsed = JSON.parse(jsonPayload);
+      if (parsed.sub && parsed.email) {
+        return {
+          id: parsed.sub,
+          email: parsed.email,
+          username: parsed.username || parsed.email.split('@')[0],
+          full_name: parsed.full_name || parsed.name || (parsed.username || parsed.email.split('@')[0]),
+          avatar_url: parsed.avatar_url || null,
+          bio: parsed.bio || null,
+          created_at: parsed.created_at || new Date().toISOString(),
+          is_active: true,
+        };
+      }
+    } catch {
+      // Fallback if token cannot be parsed
+    }
+    return null;
+  };
+
   const login = async (payload: LoginPayload) => {
     setIsLoading(true);
     const t0 = performance.now();
@@ -69,19 +101,36 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       const loginRes = await apiClient.login(payload);
       const tLogin = performance.now();
 
-      // If user profile is included in login response, use it immediately to avoid sequential network roundtrip
-      let me = loginRes.user;
+      // If user profile is included in login response or in JWT token, use it immediately
+      let me = loginRes.user || parseTokenUser(loginRes.access_token);
       let tMe = tLogin;
-      if (!me) {
+      let didFetchProfile = false;
+
+      if (me) {
+        // Immediately set user and close modal so authenticated UI renders in single tick
+        setUser(me);
+        setIsAuthModalOpen(false);
+
+        // Fetch full profile in background without blocking the UI
+        apiClient.getMe()
+          .then((fullProfile) => {
+            setUser(fullProfile);
+          })
+          .catch(() => {
+            // Non-fatal, existing token claims remain active
+          });
+      } else {
+        // Fallback for legacy token formats
         me = await apiClient.getMe();
         tMe = performance.now();
+        didFetchProfile = true;
+        setUser(me);
+        setIsAuthModalOpen(false);
       }
-      setUser(me);
-      setIsAuthModalOpen(false);
 
       if (typeof window !== 'undefined') {
         const loginDuration = Math.round(tLogin - t0);
-        const meDuration = Math.round(tMe - tLogin);
+        const meDuration = didFetchProfile ? Math.round(tMe - tLogin) : 0;
         const totalDuration = Math.round(tMe - t0);
         // Safe timing instrumentation: measures latency without exposing credentials or tokens
         console.info(`[AuthTiming] Login request: ${loginDuration}ms | Profile load: ${meDuration}ms | Total auth: ${totalDuration}ms`);
@@ -100,19 +149,30 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       // Automatically log in after registration
       const loginRes = await apiClient.login({ email: payload.email, password: payload.password });
       const tLogin = performance.now();
-      let me = loginRes.user;
+      let me = loginRes.user || parseTokenUser(loginRes.access_token);
       let tMe = tLogin;
-      if (!me) {
+      let didFetchProfile = false;
+
+      if (me) {
+        setUser(me);
+        setIsAuthModalOpen(false);
+        apiClient.getMe()
+          .then((fullProfile) => {
+            setUser(fullProfile);
+          })
+          .catch(() => {});
+      } else {
         me = await apiClient.getMe();
         tMe = performance.now();
+        didFetchProfile = true;
+        setUser(me);
+        setIsAuthModalOpen(false);
       }
-      setUser(me);
-      setIsAuthModalOpen(false);
 
       if (typeof window !== 'undefined') {
         const regDuration = Math.round(tReg - t0);
         const loginDuration = Math.round(tLogin - tReg);
-        const meDuration = Math.round(tMe - tLogin);
+        const meDuration = didFetchProfile ? Math.round(tMe - tLogin) : 0;
         const totalDuration = Math.round(tMe - t0);
         console.info(`[AuthTiming] Register: ${regDuration}ms | Login: ${loginDuration}ms | Profile: ${meDuration}ms | Total: ${totalDuration}ms`);
       }

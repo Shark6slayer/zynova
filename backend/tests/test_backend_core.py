@@ -235,3 +235,40 @@ async def test_payment_webhook_fails_closed_when_secret_missing(monkeypatch):
     fake_sig = "a" * 64
     assert payment_provider.verify_webhook_signature(payload, fake_sig) is False
     assert payment_provider.verify_webhook_signature(payload, "") is False
+
+def test_token_response_with_and_without_user_profile():
+    """Verifies TokenResponse serialization compatibility with and without optional user profile."""
+    from app.schemas.all_schemas import TokenResponse, UserProfileResponse
+    from datetime import datetime, timezone
+
+    # 1. Without user profile (legacy backend response)
+    token_without_user = TokenResponse(
+        access_token="test_access_token_123",
+        token_type="bearer",
+        refresh_token="test_refresh_token_456"
+    )
+    dump_without = token_without_user.model_dump()
+    assert dump_without["access_token"] == "test_access_token_123"
+    assert dump_without["user"] is None
+
+    # 2. With user profile (fast-auth response)
+    user_prof = UserProfileResponse(
+        id="user_abc_789",
+        email="test@zynova.intellidev.in",
+        username="zynova_user",
+        full_name="Zynova Sovereign User",
+        created_at=datetime.now(timezone.utc),
+        is_active=True
+    )
+    token_with_user = TokenResponse(
+        access_token="test_access_token_123",
+        token_type="bearer",
+        refresh_token="test_refresh_token_456",
+        user=user_prof
+    )
+    dump_with = token_with_user.model_dump()
+    assert dump_with["access_token"] == "test_access_token_123"
+    assert dump_with["user"] is not None
+    assert dump_with["user"]["id"] == "user_abc_789"
+    assert dump_with["user"]["email"] == "test@zynova.intellidev.in"
+
