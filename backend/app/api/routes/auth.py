@@ -14,9 +14,13 @@ from app.database.client import get_database
 from app.api.deps import get_current_user, get_current_user_payload
 from app.core.token_revocation import revoke_token
 
+import time
+import logging
 import re
 from app.core.rate_limit import check_auth_rate_limit
 from app.core.audit_ledger import record_audit_event
+
+logger = logging.getLogger("super_ai.auth")
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -97,12 +101,21 @@ async def register(user_in: UserRegister):
 
 @router.post("/login", response_model=TokenResponse, dependencies=[Depends(check_auth_rate_limit)])
 async def login(credentials: UserLogin):
+    t_start = time.perf_counter()
     db = get_database()
     if db is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
 
+    t_db_pre = time.perf_counter()
     user = await db.users.find_one({"email": credentials.email.lower().strip()})
+    t_db_post = time.perf_counter()
+
     if not user or not verify_password(credentials.password, user["hashed_password"]):
+        t_pwd = time.perf_counter()
+        logger.info(
+            f"[LoginTiming] Lookup: {round((t_db_post - t_db_pre) * 1000, 1)}ms | "
+            f"Verify: {round((t_pwd - t_db_post) * 1000, 1)}ms | Outcome: FAILURE"
+        )
         await record_audit_event(
             event_type="AUTH_FAILURE",
             raw_actor_id=None,
@@ -113,11 +126,13 @@ async def login(credentials: UserLogin):
             detail="Incorrect email or password"
         )
 
+    t_pwd = time.perf_counter()
     user_id = str(user["_id"])
     access_token = create_access_token({"sub": user_id, "email": user["email"]})
     refresh_token = create_refresh_token({"sub": user_id, "email": user["email"]})
+    t_token = time.perf_counter()
 
-    # Concurrently store refresh token and record audit event
+    # Concurrently persist refresh token and record audit event
     await asyncio.gather(
         db.refresh_tokens.update_one(
             {"user_id": user_id},
@@ -130,6 +145,7 @@ async def login(credentials: UserLogin):
             metadata={"method": "password"}
         )
     )
+    t_writes = time.perf_counter()
 
     user_profile = UserProfileResponse(
         id=user_id,
@@ -140,6 +156,15 @@ async def login(credentials: UserLogin):
         bio=user.get("bio"),
         created_at=user["created_at"],
         is_active=user.get("is_active", True)
+    )
+
+    t_total = time.perf_counter()
+    logger.info(
+        f"[LoginTiming] Lookup: {round((t_db_post - t_db_pre) * 1000, 1)}ms | "
+        f"Argon2: {round((t_pwd - t_db_post) * 1000, 1)}ms | "
+        f"Token: {round((t_token - t_pwd) * 1000, 1)}ms | "
+        f"Writes: {round((t_writes - t_token) * 1000, 1)}ms | "
+        f"Total: {round((t_total - t_start) * 1000, 1)}ms"
     )
 
     return TokenResponse(

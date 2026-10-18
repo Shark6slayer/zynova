@@ -166,8 +166,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   // Sync preferences with backend if authenticated
   const syncPreferencesWithServer = useCallback(async () => {
     if (!apiClient.getToken()) return;
+    const t0 = performance.now();
     try {
       const serverPrefs = await apiClient.getPreferences();
+      const tFetch = performance.now();
+      if (typeof window !== 'undefined') {
+        const syncDuration = Math.round(tFetch - t0);
+        console.info(`[AuthTiming] Background preference sync: ${syncDuration}ms`);
+      }
       if (serverPrefs && (serverPrefs.theme || serverPrefs.appearanceMode)) {
         setPreferences((prev) => {
           const merged = { ...prev, ...serverPrefs };
