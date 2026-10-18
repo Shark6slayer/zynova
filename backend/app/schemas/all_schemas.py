@@ -12,14 +12,6 @@ class UserLogin(BaseModel):
     email: EmailStr
     password: str
 
-class TokenResponse(BaseModel):
-    access_token: str
-    token_type: str = "bearer"
-    refresh_token: str
-
-class TokenRefreshRequest(BaseModel):
-    refresh_token: str
-
 class UserProfileResponse(BaseModel):
     id: str
     email: str
@@ -29,6 +21,15 @@ class UserProfileResponse(BaseModel):
     bio: Optional[str] = None
     created_at: datetime
     is_active: bool = True
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
+    refresh_token: str
+    user: Optional[UserProfileResponse] = None
+
+class TokenRefreshRequest(BaseModel):
+    refresh_token: str
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=60)

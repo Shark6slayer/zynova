@@ -1,5 +1,6 @@
 from fastapi import APIRouter, HTTPException, status, Depends
 from datetime import datetime, timezone
+import asyncio
 from bson import ObjectId
 from app.schemas.all_schemas import (
     UserRegister, UserLogin, TokenResponse, 
@@ -116,23 +117,36 @@ async def login(credentials: UserLogin):
     access_token = create_access_token({"sub": user_id, "email": user["email"]})
     refresh_token = create_refresh_token({"sub": user_id, "email": user["email"]})
 
-    # Store refresh token for revocation tracking
-    await db.refresh_tokens.update_one(
-        {"user_id": user_id},
-        {"$set": {"token": refresh_token, "updated_at": datetime.now(timezone.utc)}},
-        upsert=True
+    # Concurrently store refresh token and record audit event
+    await asyncio.gather(
+        db.refresh_tokens.update_one(
+            {"user_id": user_id},
+            {"$set": {"token": refresh_token, "updated_at": datetime.now(timezone.utc)}},
+            upsert=True
+        ),
+        record_audit_event(
+            event_type="AUTH_SUCCESS",
+            raw_actor_id=user_id,
+            metadata={"method": "password"}
+        )
     )
 
-    await record_audit_event(
-        event_type="AUTH_SUCCESS",
-        raw_actor_id=user_id,
-        metadata={"method": "password"}
+    user_profile = UserProfileResponse(
+        id=user_id,
+        email=user["email"],
+        username=user["username"],
+        full_name=user["full_name"],
+        avatar_url=user.get("avatar_url"),
+        bio=user.get("bio"),
+        created_at=user["created_at"],
+        is_active=user.get("is_active", True)
     )
 
     return TokenResponse(
         access_token=access_token,
         token_type="bearer",
-        refresh_token=refresh_token
+        refresh_token=refresh_token,
+        user=user_profile
     )
 
 @router.post("/refresh", response_model=TokenResponse)

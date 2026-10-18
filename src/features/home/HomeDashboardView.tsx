@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { 
   Sparkles, Search, MessageSquare, Utensils, ShoppingBag, 
   CreditCard, Cloud, ArrowUpRight, CheckCircle2, Clock, 
-  ChevronRight, TrendingUp, Bell, Calendar, Bot, Share2, Video, Loader2, MapPin
+  ChevronRight, ChevronDown, TrendingUp, Bell, Calendar, Bot, Share2, Video, Loader2, MapPin
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
@@ -10,11 +10,21 @@ import { t } from '../../i18n';
 import { apiClient, type RestaurantResponse, type PaymentTransactionResponse } from '../../services/apiClient';
 
 interface WeatherState {
-  status: 'loading' | 'success' | 'permission_denied' | 'unavailable';
+  status: 'idle' | 'loading' | 'success' | 'permission_denied' | 'unavailable';
   temp?: number;
   condition?: string;
   locationName?: string;
 }
+
+export const CITIES_FALLBACK = [
+  { name: 'Bengaluru', lat: 12.9716, lon: 77.5946 },
+  { name: 'Mumbai', lat: 19.0760, lon: 72.8777 },
+  { name: 'Delhi', lat: 28.6139, lon: 77.2090 },
+  { name: 'Chennai', lat: 13.0827, lon: 80.2707 },
+  { name: 'Hyderabad', lat: 17.3850, lon: 78.4867 },
+  { name: 'Kolkata', lat: 22.5726, lon: 88.3639 },
+  { name: 'Pune', lat: 18.5204, lon: 73.8567 },
+];
 
 export const HomeDashboardView: React.FC = () => {
   const { preferences, activeTheme, setActiveModule } = useApp();
@@ -79,42 +89,39 @@ export const HomeDashboardView: React.FC = () => {
       if (isMounted) setTasks([]);
     }
 
-    // Fetch live weather using browser geolocation + Open-Meteo or fallback honestly
-    if ('geolocation' in navigator) {
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          if (!isMounted) return;
-          try {
-            const { latitude, longitude } = position.coords;
-            const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`);
-            if (!res.ok) throw new Error('Weather API error');
-            const data = await res.json();
-            if (isMounted && data.current) {
-              const temp = Math.round(data.current.temperature_2m);
-              setWeather({
-                status: 'success',
-                temp,
-                condition: temp > 28 ? 'Warm' : temp < 15 ? 'Cool' : 'Pleasant',
-                locationName: 'Local Climate'
-              });
-            }
-          } catch {
-            if (isMounted) setWeather({ status: 'unavailable', locationName: 'Weather unavailable' });
+    // Weather: check permission state if available without triggering a prompt automatically
+    const checkWeatherOnMount = async () => {
+      // If user previously selected a manual city, load it
+      const savedCityName = localStorage.getItem('super_ai_selected_city');
+      if (savedCityName) {
+        const found = CITIES_FALLBACK.find(c => c.name.toLowerCase() === savedCityName.toLowerCase());
+        if (found) {
+          fetchWeatherForCoordinates(found.lat, found.lon, found.name);
+          return;
+        }
+      }
+
+      if (typeof navigator !== 'undefined' && 'permissions' in navigator && (navigator.permissions as any).query) {
+        try {
+          const status = await (navigator.permissions as any).query({ name: 'geolocation' });
+          if (status.state === 'granted') {
+            requestUserLocation(false);
+            return;
+          } else if (status.state === 'denied') {
+            if (isMounted) setWeather({ status: 'permission_denied', locationName: 'Location disabled' });
+            return;
           }
-        },
-        (error) => {
-          if (!isMounted) return;
-          if (error.code === error.PERMISSION_DENIED) {
-            setWeather({ status: 'permission_denied', locationName: 'Location disabled' });
-          } else {
-            setWeather({ status: 'unavailable', locationName: 'Weather unavailable' });
-          }
-        },
-        { timeout: 6000, maximumAge: 300000 }
-      );
-    } else {
-      setWeather({ status: 'unavailable', locationName: 'Weather unsupported' });
-    }
+        } catch {
+          // Query not supported for geolocation in some environments
+        }
+      }
+      // If prompt or not granted, start in idle state allowing user to trigger or pick city
+      if (isMounted) {
+        setWeather({ status: 'idle', locationName: 'Local Climate' });
+      }
+    };
+
+    checkWeatherOnMount();
 
     setIsLoadingRestaurants(true);
     apiClient.listRestaurants()
@@ -149,6 +156,61 @@ export const HomeDashboardView: React.FC = () => {
     };
   }, [isAuthenticated, user]);
 
+  const [isCityDropdownOpen, setIsCityDropdownOpen] = useState(false);
+
+  const fetchWeatherForCoordinates = async (latitude: number, longitude: number, cityName: string) => {
+    setWeather({ status: 'loading', locationName: cityName });
+    try {
+      const res = await fetch(`https://api.open-meteo.com/v1/forecast?latitude=${latitude}&longitude=${longitude}&current=temperature_2m,weather_code&timezone=auto`);
+      if (!res.ok) throw new Error('Weather API error');
+      const data = await res.json();
+      if (data.current) {
+        const temp = Math.round(data.current.temperature_2m);
+        setWeather({
+          status: 'success',
+          temp,
+          condition: temp > 28 ? 'Warm' : temp < 15 ? 'Cool' : 'Pleasant',
+          locationName: cityName
+        });
+      } else {
+        setWeather({ status: 'unavailable', locationName: cityName });
+      }
+    } catch {
+      setWeather({ status: 'unavailable', locationName: `${cityName} (offline)` });
+    }
+  };
+
+  const requestUserLocation = (userInitiated = true) => {
+    if (typeof navigator === 'undefined' || !('geolocation' in navigator)) {
+      setWeather({ status: 'unavailable', locationName: 'Geolocation unsupported' });
+      return;
+    }
+
+    setWeather({ status: 'loading', locationName: 'Detecting...' });
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const { latitude, longitude } = position.coords;
+        localStorage.removeItem('super_ai_selected_city');
+        fetchWeatherForCoordinates(latitude, longitude, 'Local Climate');
+      },
+      (error) => {
+        if (error.code === error.PERMISSION_DENIED) {
+          setWeather({ status: 'permission_denied', locationName: 'Location disabled' });
+        } else {
+          setWeather({ status: 'unavailable', locationName: 'Location unavailable' });
+        }
+      },
+      { timeout: 8000, maximumAge: 300000 }
+    );
+  };
+
+  const handleSelectCity = (city: typeof CITIES_FALLBACK[0]) => {
+    setIsCityDropdownOpen(false);
+    localStorage.setItem('super_ai_selected_city', city.name);
+    fetchWeatherForCoordinates(city.lat, city.lon, city.name);
+  };
+
   const handleQuickAsk = (e: React.FormEvent) => {
     e.preventDefault();
     if (!quickInput.trim()) return;
@@ -169,27 +231,93 @@ export const HomeDashboardView: React.FC = () => {
                 {t(getGreetingKey(), preferences.language, { name: user?.full_name?.split(' ')[0] || user?.username || 'Sovereign Explorer' })}
               </h1>
             </div>
-            <div className="flex items-center space-x-2">
+            <div className="relative flex items-center space-x-2">
               {weather.status === 'success' ? (
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
-                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
-                  {weather.locationName} {weather.temp}°C • {weather.condition}
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="px-3 py-1 rounded-full text-xs font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20 flex items-center gap-1.5">
+                    <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping" />
+                    {weather.locationName} {weather.temp}°C • {weather.condition}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsCityDropdownOpen(prev => !prev)}
+                    className="p-1 rounded-full text-slate-400 hover:text-white hover:bg-white/10 transition"
+                    title="Change location or city"
+                    aria-label="Change city"
+                  >
+                    <ChevronDown className="w-3.5 h-3.5" />
+                  </button>
+                </div>
               ) : weather.status === 'loading' ? (
                 <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
                   <Loader2 className="w-3 h-3 animate-spin" />
                   Updating climate...
                 </span>
               ) : weather.status === 'permission_denied' ? (
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
-                  <MapPin className="w-3 h-3" />
-                  Location access off
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
+                    <MapPin className="w-3 h-3 text-amber-400" />
+                    Location disabled
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => setIsCityDropdownOpen(prev => !prev)}
+                    className="px-2 py-1 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition flex items-center gap-1"
+                  >
+                    <span>Choose city</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                </div>
               ) : (
-                <span className="px-3 py-1 rounded-full text-xs font-medium bg-slate-500/10 text-slate-400 border border-slate-500/20 flex items-center gap-1.5">
-                  <Cloud className="w-3 h-3" />
-                  Climate unavailable
-                </span>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    type="button"
+                    onClick={() => requestUserLocation(true)}
+                    className="px-3 py-1 rounded-full text-xs font-medium bg-violet-500/10 text-violet-400 border border-violet-500/20 hover:bg-violet-500/20 flex items-center gap-1.5 transition"
+                  >
+                    <MapPin className="w-3 h-3" />
+                    Detect Climate
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setIsCityDropdownOpen(prev => !prev)}
+                    className="px-2 py-1 rounded-lg text-xs font-medium bg-white/5 hover:bg-white/10 text-slate-300 transition flex items-center gap-1"
+                  >
+                    <span>Cities</span>
+                    <ChevronDown className="w-3 h-3" />
+                  </button>
+                </div>
+              )}
+
+              {/* City Selection Dropdown */}
+              {isCityDropdownOpen && (
+                <div className="absolute right-0 top-full mt-2 w-48 py-1.5 bg-slate-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur-xl z-50 text-xs">
+                  <div className="px-3 py-1.5 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-white/5 flex items-center justify-between">
+                    <span>Select City</span>
+                    <button
+                      type="button"
+                      onClick={() => requestUserLocation(true)}
+                      className="text-violet-400 hover:text-violet-300 font-normal underline"
+                    >
+                      Use GPS
+                    </button>
+                  </div>
+                  <div className="max-h-48 overflow-y-auto py-1">
+                    {CITIES_FALLBACK.map((city) => (
+                      <button
+                        key={city.name}
+                        type="button"
+                        onClick={() => handleSelectCity(city)}
+                        className="w-full px-3 py-1.5 text-left text-slate-300 hover:text-white hover:bg-white/10 transition flex items-center justify-between"
+                      >
+                        <span>{city.name}</span>
+                        {weather.locationName === city.name && (
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />
+                        )}
+                      </button>
+                    ))}
+                  </div>
+                </div>
               )}
             </div>
           </div>

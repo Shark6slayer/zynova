@@ -68,8 +68,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     try {
       const loginRes = await apiClient.login(payload);
       const tLogin = performance.now();
-      const me = await apiClient.getMe();
-      const tMe = performance.now();
+
+      // If user profile is included in login response, use it immediately to avoid sequential network roundtrip
+      let me = loginRes.user;
+      let tMe = tLogin;
+      if (!me) {
+        me = await apiClient.getMe();
+        tMe = performance.now();
+      }
       setUser(me);
       setIsAuthModalOpen(false);
 
@@ -92,10 +98,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       await apiClient.register(payload);
       const tReg = performance.now();
       // Automatically log in after registration
-      await apiClient.login({ email: payload.email, password: payload.password });
+      const loginRes = await apiClient.login({ email: payload.email, password: payload.password });
       const tLogin = performance.now();
-      const me = await apiClient.getMe();
-      const tMe = performance.now();
+      let me = loginRes.user;
+      let tMe = tLogin;
+      if (!me) {
+        me = await apiClient.getMe();
+        tMe = performance.now();
+      }
       setUser(me);
       setIsAuthModalOpen(false);
 
