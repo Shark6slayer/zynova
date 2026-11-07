@@ -57,3 +57,4 @@ adb logcat -v time | Select-String -Pattern "Capacitor|Chromium|zynova|FATAL|And
 6. AI Assistant: Live streaming Gemini responses.
 7. Android Hardware Back Button: Verify back-stack navigation without premature app exit.
 8. Background / Resume lifecycle: Sleep app, lock screen, and unlock.
+

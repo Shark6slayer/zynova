@@ -49,3 +49,4 @@
 ### 2.4 Credential & Secret Bundling Audit
 - **Verification:** Audited `dist/` web assets synced to `android/app/src/main/assets/public/`.
 - **Result:** No backend `.env` variables (`REDIS_URL`, `GEMINI_API_KEY`, `MEDIA_S3_*`, `JWT_SECRET_KEY`) are bundled into the APK. All communication utilizes standard HTTPS/WSS REST and WebSocket clients with session JWTs.
+

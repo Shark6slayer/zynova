@@ -27,3 +27,4 @@
 ### 1.4 Webview Isolation & Sandbox
 - `bundledWebRuntime: false` ensures external scripts cannot inject arbitrary runtime modifications.
 - Local assets are served securely from the internal package context (`android\app\src\main\assets\public`).
+

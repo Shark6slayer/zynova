@@ -27,3 +27,4 @@
   - Emulator and browser tests are **never** reported as physical-device tests.
   - No physical-device validation claim is made until an actual device is enumerated via ADB and tested on hardware.
   - Zero modifications were made to production deployments.
+
