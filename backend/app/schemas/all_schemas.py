@@ -476,21 +476,57 @@ class SearchResponse(BaseModel):
     has_more: bool
     results: List[SearchResultItem]
 
-# Video Platform Schemas
+# Video Platform Schemas (Phase 27 Extended)
+class ChannelCreatePayload(BaseModel):
+    handle: str = Field(..., min_length=3, max_length=30, pattern="^[a-zA-Z0-9_]+$")
+    name: str = Field(..., min_length=2, max_length=60)
+    description: Optional[str] = Field(None, max_length=1000)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    banner_url: Optional[str] = Field(None, max_length=500)
+
+class ChannelUpdatePayload(BaseModel):
+    name: Optional[str] = Field(None, min_length=2, max_length=60)
+    description: Optional[str] = Field(None, max_length=1000)
+    avatar_url: Optional[str] = Field(None, max_length=500)
+    banner_url: Optional[str] = Field(None, max_length=500)
+
+class ChannelResponse(BaseModel):
+    id: str
+    owner_id: str
+    handle: str
+    name: str
+    description: Optional[str] = None
+    avatar_url: Optional[str] = None
+    banner_url: Optional[str] = None
+    subscriber_count: int = 0
+    video_count: int = 0
+    shorts_count: int = 0
+    is_subscribed: bool = False
+    is_owner: bool = False
+    created_at: datetime
+    updated_at: datetime
+
 class VideoCreate(BaseModel):
     title: str = Field(..., min_length=2, max_length=150)
     description: Optional[str] = Field(None, max_length=2000)
     thumbnail_url: Optional[str] = Field(None, max_length=500)
-    visibility: str = Field("public", pattern="^(public|private)$")
+    visibility: str = Field("public", pattern="^(public|unlisted|private)$")
+    category: str = Field("General", max_length=50)
+    channel_id: Optional[str] = None
+    is_short: bool = False
+    audio_title: Optional[str] = Field(None, max_length=100)
+    audio_artist: Optional[str] = Field(None, max_length=100)
 
 class VideoUpdate(BaseModel):
     title: Optional[str] = Field(None, min_length=2, max_length=150)
     description: Optional[str] = Field(None, max_length=2000)
     thumbnail_url: Optional[str] = Field(None, max_length=500)
-    visibility: Optional[str] = Field(None, pattern="^(public|private)$")
+    visibility: Optional[str] = Field(None, pattern="^(public|unlisted|private)$")
+    category: Optional[str] = Field(None, max_length=50)
 
 class VideoCommentCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=500)
+    parent_comment_id: Optional[str] = None
 
 class VideoCommentResponse(BaseModel):
     id: str
@@ -500,7 +536,9 @@ class VideoCommentResponse(BaseModel):
     author_full_name: str
     author_avatar: Optional[str] = None
     content: str
+    parent_comment_id: Optional[str] = None
     created_at: datetime
+    is_pinned: bool = False
     is_owner: bool = False
 
 class VideoResponse(BaseModel):
@@ -509,6 +547,9 @@ class VideoResponse(BaseModel):
     owner_username: str
     owner_full_name: str
     owner_avatar: Optional[str] = None
+    channel_id: Optional[str] = None
+    channel_handle: Optional[str] = None
+    channel_name: Optional[str] = None
     title: str
     description: Optional[str] = None
     storage_key: str
@@ -516,15 +557,63 @@ class VideoResponse(BaseModel):
     file_size_bytes: int
     duration_seconds: Optional[float] = None
     thumbnail_url: Optional[str] = None
-    visibility: str
-    status: str
+    visibility: str = "public"  # public, unlisted, private
+    status: str = "published"    # draft, processing, published
+    category: str = "General"
+    is_short: bool = False
+    aspect_ratio: Optional[str] = "16:9"
+    audio_title: Optional[str] = None
+    audio_artist: Optional[str] = None
     view_count: int = 0
     likes_count: int = 0
+    dislikes_count: int = 0
     comments_count: int = 0
     is_liked: bool = False
+    is_saved: bool = False
     is_owner: bool = False
     created_at: datetime
     updated_at: datetime
+
+class PlaylistCreatePayload(BaseModel):
+    title: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    visibility: str = Field("public", pattern="^(public|unlisted|private)$")
+    video_ids: Optional[List[str]] = None
+
+class PlaylistResponse(BaseModel):
+    id: str
+    owner_id: str
+    owner_username: str
+    title: str
+    description: Optional[str] = None
+    visibility: str
+    video_ids: List[str]
+    videos_count: int = 0
+    created_at: datetime
+    updated_at: datetime
+
+class WatchProgressPayload(BaseModel):
+    playback_position_seconds: float = Field(..., ge=0)
+    duration_seconds: float = Field(..., ge=0)
+    completed: bool = False
+
+class WatchHistoryResponse(BaseModel):
+    video: VideoResponse
+    playback_position_seconds: float
+    last_watched_at: datetime
+    completed: bool
+
+class CreatorAnalyticsResponse(BaseModel):
+    channel_id: str
+    total_views: int
+    total_watch_time_seconds: float
+    average_view_duration_seconds: float
+    total_subscribers: int
+    total_videos: int
+    total_shorts: int
+    total_likes: int
+    total_comments: int
+    top_videos: List[Dict[str, Any]]
 
 # Food Discovery and Ordering Schemas
 class MenuItemResponse(BaseModel):

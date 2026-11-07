@@ -52,7 +52,7 @@ export const VideoStreamView: React.FC = () => {
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editThumbnailUrl, setEditThumbnailUrl] = useState('');
-  const [editVisibility, setEditVisibility] = useState<'public' | 'private'>('public');
+  const [editVisibility, setEditVisibility] = useState<'public' | 'unlisted' | 'private'>('public');
   const [isSavingEdit, setIsSavingEdit] = useState<boolean>(false);
 
   // Fetch Videos Feed
@@ -60,7 +60,7 @@ export const VideoStreamView: React.FC = () => {
     setIsLoadingFeed(true);
     setFeedError(null);
     try {
-      const data = await apiClient.listVideos(25);
+      const data = await apiClient.listVideos(undefined, 25);
       setVideos(data);
       if (data.length > 0 && !selectedVideo) {
         setSelectedVideo(data[0]);

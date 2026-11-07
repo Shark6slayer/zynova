@@ -326,6 +326,54 @@ export interface SearchResponse {
   results: SearchResultItem[];
 }
 
+export interface ChannelResponse {
+  id: string;
+  owner_id: string;
+  handle: string;
+  name: string;
+  description?: string | null;
+  avatar_url?: string | null;
+  banner_url?: string | null;
+  subscriber_count: number;
+  video_count: number;
+  shorts_count: number;
+  is_subscribed: boolean;
+  is_owner: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PlaylistResponse {
+  id: string;
+  owner_id: string;
+  owner_username: string;
+  title: string;
+  description?: string | null;
+  visibility: string;
+  video_ids: string[];
+  videos_count: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CreatorAnalyticsResponse {
+  channel_id: string;
+  total_views: number;
+  total_watch_time_seconds: number;
+  average_view_duration_seconds: number;
+  total_subscribers: number;
+  total_videos: number;
+  total_shorts: number;
+  total_likes: number;
+  total_comments: number;
+  top_videos: Array<{
+    id: string;
+    title: string;
+    views: number;
+    likes: number;
+  }>;
+}
+
 // Video Platform Interfaces
 export interface VideoResponse {
   id: string;
@@ -333,6 +381,9 @@ export interface VideoResponse {
   owner_username: string;
   owner_full_name: string;
   owner_avatar?: string | null;
+  channel_id?: string | null;
+  channel_handle?: string | null;
+  channel_name?: string | null;
   title: string;
   description?: string | null;
   storage_key: string;
@@ -340,12 +391,19 @@ export interface VideoResponse {
   file_size_bytes: number;
   duration_seconds?: number | null;
   thumbnail_url?: string | null;
-  visibility: 'public' | 'private';
+  visibility: 'public' | 'unlisted' | 'private';
   status: string;
+  category?: string;
+  is_short?: boolean;
+  aspect_ratio?: string;
+  audio_title?: string | null;
+  audio_artist?: string | null;
   view_count: number;
   likes_count: number;
+  dislikes_count?: number;
   comments_count: number;
   is_liked: boolean;
+  is_saved?: boolean;
   is_owner: boolean;
   created_at: string;
   updated_at: string;
@@ -1324,8 +1382,73 @@ class ApiClient {
     return response.json();
   }
 
-  async listVideos(limit: number = 20, offset: number = 0): Promise<VideoResponse[]> {
-    return this.request<VideoResponse[]>(`/videos?limit=${limit}&offset=${offset}`);
+  async listVideos(category?: string, limit: number = 20): Promise<VideoResponse[]> {
+    let url = `/videos?limit=${limit}`;
+    if (category) {
+      url += `&category=${encodeURIComponent(category)}`;
+    }
+    return this.request<VideoResponse[]>(url);
+  }
+
+  async listShorts(limit: number = 15): Promise<VideoResponse[]> {
+    return this.request<VideoResponse[]>(`/videos/shorts?limit=${limit}`);
+  }
+
+  async getRecommendedVideos(category?: string, limit: number = 20): Promise<VideoResponse[]> {
+    let url = `/videos/recommendations?limit=${limit}`;
+    if (category) {
+      url += `&category=${encodeURIComponent(category)}`;
+    }
+    return this.request<VideoResponse[]>(url);
+  }
+
+  async getChannel(identifier: string): Promise<ChannelResponse> {
+    return this.request<ChannelResponse>(`/videos/channels/${encodeURIComponent(identifier)}`);
+  }
+
+  async createOrUpdateChannel(payload: { handle: string; name: string; description?: string; avatar_url?: string; banner_url?: string }): Promise<ChannelResponse> {
+    return this.request<ChannelResponse>('/videos/channels', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async subscribeChannel(channelId: string): Promise<{ is_subscribed: boolean; subscriber_count?: number }> {
+    return this.request<{ is_subscribed: boolean; subscriber_count?: number }>(`/videos/channels/${channelId}/subscribe`, {
+      method: 'POST',
+    });
+  }
+
+  async getChannelAnalytics(channelId: string): Promise<CreatorAnalyticsResponse> {
+    return this.request<CreatorAnalyticsResponse>(`/videos/channels/${channelId}/analytics`);
+  }
+
+  async createPlaylist(payload: { title: string; description?: string; visibility: string; video_ids?: string[] }): Promise<PlaylistResponse> {
+    return this.request<PlaylistResponse>('/videos/playlists', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addOrRemovePlaylistVideo(playlistId: string, videoId: string, action: 'add' | 'remove' = 'add'): Promise<any> {
+    return this.request(`/videos/playlists/${playlistId}/videos/${videoId}?action=${action}`, {
+      method: 'POST',
+    });
+  }
+
+  async recordWatchProgress(videoId: string, playbackPosition: number, duration: number, completed: boolean = false): Promise<void> {
+    await this.request(`/videos/${videoId}/progress`, {
+      method: 'POST',
+      body: JSON.stringify({
+        playback_position_seconds: playbackPosition,
+        duration_seconds: duration,
+        completed,
+      }),
+    });
+  }
+
+  async getWatchHistory(): Promise<Array<{ video: VideoResponse; playback_position_seconds: number; last_watched_at: string; completed: boolean }>> {
+    return this.request(`/videos/user/history`);
   }
 
   async getVideoDetail(videoId: string): Promise<VideoResponse> {
@@ -1391,7 +1514,7 @@ class ApiClient {
 
   async updateVideo(
     videoId: string,
-    payload: { title?: string; description?: string; thumbnail_url?: string; visibility?: 'public' | 'private' }
+    payload: { title?: string; description?: string; thumbnail_url?: string; visibility?: 'public' | 'unlisted' | 'private'; category?: string }
   ): Promise<VideoResponse> {
     return this.request<VideoResponse>(`/videos/${videoId}`, {
       method: 'PATCH',
