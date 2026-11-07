@@ -165,11 +165,15 @@ class SocialProfileResponse(BaseModel):
     full_name: str
     avatar_url: Optional[str] = None
     bio: Optional[str] = None
+    website: Optional[str] = None
+    is_private: bool = False
+    is_verified: bool = False
     created_at: datetime
     followers_count: int = 0
     following_count: int = 0
     posts_count: int = 0
     is_following: bool = False
+    has_pending_follow_request: bool = False
     is_self: bool = False
 
 class PostCreate(BaseModel):
@@ -177,12 +181,17 @@ class PostCreate(BaseModel):
     image_url: Optional[str] = Field(None, max_length=500)
     media_url: Optional[str] = Field(None, max_length=500)
     media_type: Optional[str] = Field("image", pattern="^(image|video)$")
+    media_assets: Optional[List[str]] = Field(None, max_length=10) # Multi-image/carousel asset IDs
+    tags: Optional[List[str]] = Field(None, max_length=30)
+    location: Optional[str] = Field(None, max_length=100)
 
 class PostUpdate(BaseModel):
     content: str = Field(..., min_length=1, max_length=2000)
     image_url: Optional[str] = Field(None, max_length=500)
     media_url: Optional[str] = Field(None, max_length=500)
     media_type: Optional[str] = Field(None, pattern="^(image|video)$")
+    tags: Optional[List[str]] = Field(None, max_length=30)
+    location: Optional[str] = Field(None, max_length=100)
 
 class PostResponse(BaseModel):
     id: str
@@ -190,20 +199,26 @@ class PostResponse(BaseModel):
     author_username: str
     author_full_name: str
     author_avatar: Optional[str] = None
+    author_is_verified: bool = False
     content: str
     image_url: Optional[str] = None
     media_url: Optional[str] = None
     media_type: Optional[str] = "image"
+    media_assets: Optional[List[str]] = None
+    tags: Optional[List[str]] = None
+    location: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     is_edited: bool = False
     likes_count: int = 0
     comments_count: int = 0
     is_liked: bool = False
+    is_bookmarked: bool = False
     is_owner: bool = False
 
 class CommentCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=500)
+    parent_comment_id: Optional[str] = None
 
 class CommentResponse(BaseModel):
     id: str
@@ -213,8 +228,85 @@ class CommentResponse(BaseModel):
     author_full_name: str
     author_avatar: Optional[str] = None
     content: str
+    parent_comment_id: Optional[str] = None
     created_at: datetime
     is_owner: bool = False
+
+class StoryCreate(BaseModel):
+    media_url: str = Field(..., min_length=1, max_length=500)
+    media_type: str = Field("image", pattern="^(image|video)$")
+    caption: Optional[str] = Field(None, max_length=280)
+    is_close_friends_only: bool = False
+
+class StoryReactionCreate(BaseModel):
+    reaction: str = Field(..., min_length=1, max_length=10) # Emoji reaction
+
+class StoryItemResponse(BaseModel):
+    id: str
+    media_url: str
+    media_type: str = "image"
+    caption: Optional[str] = None
+    is_close_friends_only: bool = False
+    created_at: datetime
+    expires_at: datetime
+    views_count: int = 0
+    is_seen: bool = False
+
+class StoryGroupResponse(BaseModel):
+    author_id: str
+    author_username: str
+    author_full_name: str
+    author_avatar: Optional[str] = None
+    has_unseen: bool = False
+    stories: List[StoryItemResponse]
+
+class StoryHighlightCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=30)
+    cover_image_url: Optional[str] = None
+    story_ids: List[str] = Field(..., min_length=1)
+
+class StoryHighlightResponse(BaseModel):
+    id: str
+    author_id: str
+    title: str
+    cover_image_url: Optional[str] = None
+    stories_count: int
+    created_at: datetime
+
+class SocialNoteCreate(BaseModel):
+    text: str = Field(..., min_length=1, max_length=60)
+    music_title: Optional[str] = Field(None, max_length=60)
+    music_artist: Optional[str] = Field(None, max_length=60)
+
+class SocialNoteResponse(BaseModel):
+    id: str
+    user_id: str
+    username: str
+    full_name: str
+    avatar_url: Optional[str] = None
+    text: str
+    music_title: Optional[str] = None
+    music_artist: Optional[str] = None
+    created_at: datetime
+    expires_at: datetime
+
+class VerificationApplicationCreate(BaseModel):
+    full_legal_name: str = Field(..., min_length=2, max_length=100)
+    document_type: str = Field(..., pattern="^(passport|national_id|drivers_license|business_doc)$")
+    evidence_urls: List[str] = Field(..., min_length=1, max_length=5)
+    category: str = Field(..., pattern="^(news_media|sports|entertainment|creator|business|government)$")
+    reason: str = Field(..., min_length=10, max_length=1000)
+
+class VerificationApplicationResponse(BaseModel):
+    id: str
+    user_id: str
+    full_legal_name: str
+    document_type: str
+    category: str
+    status: str # "pending", "approved", "rejected"
+    reviewer_notes: Optional[str] = None
+    created_at: datetime
+    reviewed_at: Optional[datetime] = None
 
 class ReportCreate(BaseModel):
     target_type: str = Field(..., pattern="^(post|user|comment)$")

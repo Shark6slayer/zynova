@@ -131,11 +131,15 @@ export interface SocialProfileResponse {
   full_name: string;
   avatar_url?: string | null;
   bio?: string | null;
+  website?: string | null;
+  is_private?: boolean;
+  is_verified?: boolean;
   created_at: string;
   followers_count: number;
   following_count: number;
   posts_count: number;
   is_following: boolean;
+  has_pending_follow_request?: boolean;
   is_self: boolean;
 }
 
@@ -144,6 +148,9 @@ export interface PostCreatePayload {
   image_url?: string | null;
   media_url?: string | null;
   media_type?: 'image' | 'video' | null;
+  media_assets?: string[];
+  tags?: string[];
+  location?: string | null;
 }
 
 export interface PostResponse {
@@ -152,17 +159,56 @@ export interface PostResponse {
   author_username: string;
   author_full_name: string;
   author_avatar?: string | null;
+  author_is_verified?: boolean;
   content: string;
   image_url?: string | null;
   media_url?: string | null;
   media_type?: 'image' | 'video' | null;
+  media_assets?: string[];
+  tags?: string[];
+  location?: string | null;
   created_at: string;
   updated_at: string;
   is_edited: boolean;
   likes_count: number;
   comments_count: number;
   is_liked: boolean;
+  is_bookmarked?: boolean;
   is_owner: boolean;
+}
+
+export interface StoryItemResponse {
+  id: string;
+  media_url: string;
+  media_type: 'image' | 'video';
+  caption?: string | null;
+  is_close_friends_only?: boolean;
+  created_at: string;
+  expires_at: string;
+  views_count: number;
+  is_seen: boolean;
+}
+
+export interface StoryGroupResponse {
+  author_id: string;
+  author_username: string;
+  author_full_name: string;
+  author_avatar?: string | null;
+  has_unseen: boolean;
+  stories: StoryItemResponse[];
+}
+
+export interface SocialNoteResponse {
+  id: string;
+  user_id: string;
+  username: string;
+  full_name: string;
+  avatar_url?: string | null;
+  text: string;
+  music_title?: string | null;
+  music_artist?: string | null;
+  created_at: string;
+  expires_at: string;
 }
 
 export interface CommentResponse {
@@ -984,6 +1030,76 @@ class ApiClient {
 
   async reportContent(payload: ReportPayload): Promise<ReportResponse> {
     return this.request<ReportResponse>('/social/reports', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  // Phase 25: Social Stories Methods
+  async getStoriesFeed(): Promise<StoryGroupResponse[]> {
+    return this.request<StoryGroupResponse[]>('/social/stories/feed');
+  }
+
+  async createStory(payload: { media_url: string; media_type?: 'image' | 'video'; caption?: string; is_close_friends_only?: boolean }): Promise<StoryItemResponse> {
+    return this.request<StoryItemResponse>('/social/stories', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async viewStory(storyId: string): Promise<{ status: string; views_count: number }> {
+    return this.request<{ status: string; views_count: number }>(`/social/stories/${storyId}/view`, {
+      method: 'POST',
+    });
+  }
+
+  async reactToStory(storyId: string, reaction: string): Promise<{ status: string; reaction: string }> {
+    return this.request<{ status: string; reaction: string }>(`/social/stories/${storyId}/react`, {
+      method: 'POST',
+      body: JSON.stringify({ reaction }),
+    });
+  }
+
+  // Phase 25: Social Notes
+  async getFollowingNotes(): Promise<SocialNoteResponse[]> {
+    return this.request<SocialNoteResponse[]>('/social/notes');
+  }
+
+  async postSocialNote(text: string, music_title?: string, music_artist?: string): Promise<SocialNoteResponse> {
+    return this.request<SocialNoteResponse>('/social/notes', {
+      method: 'POST',
+      body: JSON.stringify({ text, music_title, music_artist }),
+    });
+  }
+
+  // Phase 25: Bookmarks & Explore
+  async togglePostBookmark(postId: string): Promise<{ status: string; post_id: string }> {
+    return this.request<{ status: string; post_id: string }>(`/social/posts/${postId}/bookmark`, {
+      method: 'POST',
+    });
+  }
+
+  async getBookmarkedPosts(limit: number = 25): Promise<PostResponse[]> {
+    return this.request<PostResponse[]>(`/social/bookmarks?limit=${limit}`);
+  }
+
+  async getExploreFeed(limit: number = 30): Promise<PostResponse[]> {
+    return this.request<PostResponse[]>(`/social/explore?limit=${limit}`);
+  }
+
+  async getPostsByHashtag(tag: string, limit: number = 25): Promise<PostResponse[]> {
+    return this.request<PostResponse[]>(`/social/tags/${encodeURIComponent(tag)}?limit=${limit}`);
+  }
+
+  // Phase 25: Verification
+  async applyForVerification(payload: {
+    full_legal_name: string;
+    document_type: string;
+    evidence_urls: string[];
+    category: string;
+    reason: string;
+  }): Promise<{ status: string; id: string }> {
+    return this.request<{ status: string; id: string }>('/social/verification/apply', {
       method: 'POST',
       body: JSON.stringify(payload),
     });

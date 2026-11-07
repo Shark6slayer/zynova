@@ -17,10 +17,41 @@ from app.schemas.all_schemas import (
     CommentResponse,
     ReportCreate,
     ReportResponse,
-    UserPublicSummary
+    UserPublicSummary,
+    StoryCreate,
+    StoryReactionCreate,
+    StoryGroupResponse,
+    StoryHighlightCreate,
+    StoryHighlightResponse,
+    SocialNoteCreate,
+    SocialNoteResponse,
+    VerificationApplicationCreate,
+    VerificationApplicationResponse
 )
 from app.api.deps import get_current_user, get_optional_current_user
 from app.database.client import get_database
+from app.services.identity_service import is_blocked, get_blocked_users
+from app.services.social_service import (
+    extract_hashtags,
+    request_follow_user,
+    respond_to_follow_request,
+    remove_follower,
+    get_suggested_accounts,
+    create_story,
+    get_stories_feed,
+    record_story_view,
+    add_story_reaction,
+    create_story_highlight,
+    get_user_highlights,
+    post_social_note,
+    get_following_notes,
+    toggle_post_bookmark,
+    get_bookmarked_posts,
+    get_explore_feed,
+    get_posts_by_hashtag,
+    submit_verification_application,
+    review_verification_application
+)
 from app.core.rate_limit import (
     check_social_post_rate_limit,
     check_comment_rate_limit,
@@ -103,19 +134,33 @@ async def get_social_profile(
     if not target_user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
 
+    my_id = current_user["id"] if current_user else None
+    if my_id and my_id != user_id:
+        if await is_blocked(db, my_id, user_id):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User profile unavailable")
+
     followers_count = await db.follows.count_documents({"following_id": user_id})
     following_count = await db.follows.count_documents({"follower_id": user_id})
     posts_count = await db.posts.count_documents({"author_id": user_id})
 
-    # Check if current user is following target user
+    # Check if current user is following target user or has pending request
     is_following = False
-    my_id = current_user["id"] if current_user else None
+    has_pending = False
     if my_id and my_id != user_id:
         existing_follow = await db.follows.find_one({
             "follower_id": my_id,
             "following_id": user_id
         })
         is_following = existing_follow is not None
+        if not is_following:
+            pending_req = await db.follow_requests.find_one({
+                "sender_id": my_id,
+                "target_id": user_id,
+                "status": "pending"
+            })
+            has_pending = pending_req is not None
+
+    social_profile = target_user.get("social_profile", {})
 
     return SocialProfileResponse(
         id=user_id,
@@ -123,15 +168,19 @@ async def get_social_profile(
         full_name=target_user["full_name"],
         avatar_url=target_user.get("avatar_url"),
         bio=target_user.get("bio"),
+        website=social_profile.get("website"),
+        is_private=social_profile.get("is_private", False),
+        is_verified=social_profile.get("is_verified", False),
         created_at=target_user.get("created_at", datetime.now(timezone.utc)),
         followers_count=followers_count,
         following_count=following_count,
         posts_count=posts_count,
         is_following=is_following,
+        has_pending_follow_request=has_pending,
         is_self=(my_id == user_id) if my_id else False
     )
 
-# 2. Follow User
+# 2. Follow User (Handles public auto-follow vs private request)
 @router.post("/profiles/{user_id}/follow", status_code=status.HTTP_200_OK)
 async def follow_user(
     user_id: str,
@@ -141,43 +190,44 @@ async def follow_user(
     if db is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
 
-    my_id = current_user["id"]
-    if my_id == user_id:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot follow yourself")
+    return await request_follow_user(db, current_user, user_id)
 
-    try:
-        target_obj = ObjectId(user_id)
-    except Exception:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid user ID")
+# 2b. Follow Request Response (Accept or Reject)
+@router.post("/follow-requests/{sender_id}/respond", status_code=status.HTTP_200_OK)
+async def handle_follow_request(
+    sender_id: str,
+    action: str = Query(..., pattern="^(accept|reject)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
 
-    target = await db.users.find_one({"_id": target_obj})
-    if not target:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+    return await respond_to_follow_request(db, current_user["id"], sender_id, action)
 
-    # Upsert to prevent duplicate-follow race conditions
-    now = datetime.now(timezone.utc)
-    res = await db.follows.update_one(
-        {"follower_id": my_id, "following_id": user_id},
-        {"$setOnInsert": {"follower_id": my_id, "following_id": user_id, "created_at": now}},
-        upsert=True
-    )
+# 2c. Remove Follower
+@router.delete("/followers/{follower_id}", status_code=status.HTTP_200_OK)
+async def remove_follower_endpoint(
+    follower_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
 
-    # Trigger notification if this is a newly created follow
-    if res.upserted_id:
-        from app.services.notification_service import create_event_notification
-        await create_event_notification(
-            recipient_user_id=user_id,
-            actor_user_id=my_id,
-            category="social",
-            event_type="social_follow",
-            title=f"{current_user['full_name']} started following you",
-            desc=f"@{current_user['username']} is now following your updates.",
-            navigation_target=f"social:user:{my_id}",
-            metadata={"follower_id": my_id, "follower_username": current_user["username"]},
-            event_id=f"follow_{my_id}_{user_id}"
-        )
+    return await remove_follower(db, current_user["id"], follower_id)
 
-    return {"status": "following", "following_id": user_id}
+# 2d. Suggested Accounts
+@router.get("/suggested", response_model=List[dict])
+async def list_suggested_accounts(
+    limit: int = Query(10, ge=1, le=30),
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    return await get_suggested_accounts(db, current_user["id"], limit)
 
 # 3. Unfollow User
 @router.delete("/profiles/{user_id}/follow", status_code=status.HTTP_200_OK)
@@ -412,14 +462,22 @@ async def get_feed(
     my_id = current_user["id"] if current_user else None
     query: dict = {}
 
+    # Mutual blocking isolation: hide posts from blocked/blocking users
+    if my_id:
+        blocked_ids = await get_blocked_users(db, my_id)
+        if blocked_ids:
+            query["author_id"] = {"$nin": blocked_ids}
+
     if mode == "following":
         if not my_id:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Authentication required for following feed")
         # Find all user IDs current_user follows
         follows_cursor = db.follows.find({"follower_id": my_id})
         followed_ids = [f["following_id"] for f in await follows_cursor.to_list(length=1000)]
-        # Include self posts in following feed as well
         followed_ids.append(my_id)
+        # Apply blocking filter to followed list
+        if my_id and blocked_ids:
+            followed_ids = [uid for uid in followed_ids if uid not in blocked_ids]
         query["author_id"] = {"$in": followed_ids}
     elif mode == "reels":
         query["media_type"] = "video"
@@ -446,6 +504,9 @@ async def get_feed(
             image_url=p.get("image_url"),
             media_url=p.get("media_url"),
             media_type=p.get("media_type", "image"),
+            media_assets=p.get("media_assets", []),
+            tags=p.get("tags", []),
+            location=p.get("location"),
             created_at=p["created_at"],
             updated_at=p.get("updated_at", p["created_at"]),
             is_edited=p.get("is_edited", False),
@@ -470,6 +531,18 @@ async def get_user_posts(
         return []
 
     my_id = current_user["id"] if current_user else None
+    if my_id and my_id != user_id:
+        if await is_blocked(db, my_id, user_id):
+            return []
+
+    # Check if target account is private and viewer is not following
+    target_user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if target_user and target_user.get("social_profile", {}).get("is_private", False):
+        if my_id != user_id:
+            is_follower = await db.follows.find_one({"follower_id": my_id, "following_id": user_id}) if my_id else False
+            if not is_follower:
+                return []
+
     query: dict = {"author_id": user_id}
     if media_filter:
         query["media_type"] = media_filter
@@ -490,6 +563,9 @@ async def get_user_posts(
             image_url=p.get("image_url"),
             media_url=p.get("media_url"),
             media_type=p.get("media_type", "image"),
+            media_assets=p.get("media_assets", []),
+            tags=p.get("tags", []),
+            location=p.get("location"),
             created_at=p["created_at"],
             updated_at=p.get("updated_at", p["created_at"]),
             is_edited=p.get("is_edited", False),
@@ -875,3 +951,278 @@ async def get_social_media(filename: str):
         "Cache-Control": "public, max-age=86400"
     }
     return StreamingResponse(file_generator(), headers=headers, media_type=mime)
+
+# ---------------------------------------------------------------------------
+# Phase 25 Social Platform Additions: Stories, Highlights, Notes & Verification
+# ---------------------------------------------------------------------------
+
+# 19. Create 24-Hour Ephemeral Story
+@router.post("/stories", status_code=status.HTTP_201_CREATED)
+async def post_story(
+    story_in: StoryCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    check_social_post_rate_limit(current_user["id"])
+    return await create_story(
+        db=db,
+        author=current_user,
+        media_url=story_in.media_url,
+        media_type=story_in.media_type,
+        caption=story_in.caption,
+        is_close_friends_only=story_in.is_close_friends_only
+    )
+
+# 20. Get Stories Feed (Grouped by followed users + self)
+@router.get("/stories/feed", response_model=List[StoryGroupResponse])
+async def list_stories_feed(
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    return await get_stories_feed(db, current_user["id"])
+
+# 21. Record Story View
+@router.post("/stories/{story_id}/view", status_code=status.HTTP_200_OK)
+async def view_story(
+    story_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    return await record_story_view(db, story_id, current_user["id"])
+
+# 22. React to Story
+@router.post("/stories/{story_id}/react", status_code=status.HTTP_200_OK)
+async def react_to_story(
+    story_id: str,
+    reaction_in: StoryReactionCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    return await add_story_reaction(db, story_id, current_user["id"], reaction_in.reaction)
+
+# 23. Story Highlights
+@router.post("/highlights", status_code=status.HTTP_201_CREATED)
+async def create_highlight(
+    highlight_in: StoryHighlightCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    return await create_story_highlight(
+        db=db,
+        author_id=current_user["id"],
+        title=highlight_in.title,
+        story_ids=highlight_in.story_ids,
+        cover_image_url=highlight_in.cover_image_url
+    )
+
+@router.get("/users/{user_id}/highlights", response_model=List[dict])
+async def list_user_highlights(
+    user_id: str,
+    current_user: Optional[dict] = Depends(get_optional_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    viewer_id = current_user["id"] if current_user else None
+    return await get_user_highlights(db, user_id, viewer_id)
+
+# 24. Social Notes (60-character status expiring in 24h)
+@router.post("/notes", status_code=status.HTTP_201_CREATED)
+async def post_note(
+    note_in: SocialNoteCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    return await post_social_note(
+        db=db,
+        user=current_user,
+        text=note_in.text,
+        music_title=note_in.music_title,
+        music_artist=note_in.music_artist
+    )
+
+@router.get("/notes", response_model=List[SocialNoteResponse])
+async def list_notes(
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    return await get_following_notes(db, current_user["id"])
+
+# 25. Bookmark / Save Post Toggle
+@router.post("/posts/{post_id}/bookmark", status_code=status.HTTP_200_OK)
+async def bookmark_post(
+    post_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    return await toggle_post_bookmark(db, post_id, current_user["id"])
+
+# 26. Get Bookmarked Posts
+@router.get("/bookmarks", response_model=List[PostResponse])
+async def list_bookmarks(
+    limit: int = Query(25, ge=1, le=50),
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    bookmarked_data = await get_bookmarked_posts(db, current_user["id"], limit)
+    responses = []
+    for p in bookmarked_data:
+        responses.append(PostResponse(
+            id=p["id"],
+            author_id=p["author_id"],
+            author_username=p["author_username"],
+            author_full_name=p["author_full_name"],
+            author_avatar=p.get("author_avatar"),
+            content=p["content"],
+            image_url=p.get("image_url"),
+            media_url=p.get("media_url"),
+            media_type=p.get("media_type", "image"),
+            media_assets=p.get("media_assets", []),
+            tags=p.get("tags", []),
+            location=p.get("location"),
+            created_at=p["created_at"],
+            updated_at=p["created_at"],
+            is_edited=False,
+            likes_count=p.get("likes_count", 0),
+            comments_count=p.get("comments_count", 0),
+            is_liked=False,
+            is_bookmarked=True,
+            is_owner=(p["author_id"] == current_user["id"])
+        ))
+    return responses
+
+# 27. Explore Feed (Ranked engagement discovery)
+@router.get("/explore", response_model=List[PostResponse])
+async def explore_posts(
+    limit: int = Query(30, ge=1, le=60),
+    current_user: Optional[dict] = Depends(get_optional_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    my_id = current_user["id"] if current_user else None
+    explore_data = await get_explore_feed(db, my_id, limit)
+
+    responses = []
+    for p in explore_data:
+        responses.append(PostResponse(
+            id=p["id"],
+            author_id=p["author_id"],
+            author_username=p["author_username"],
+            author_full_name=p["author_full_name"],
+            author_avatar=p.get("author_avatar"),
+            content=p["content"],
+            image_url=p.get("image_url"),
+            media_url=p.get("media_url"),
+            media_type=p.get("media_type", "image"),
+            media_assets=p.get("media_assets", []),
+            tags=p.get("tags", []),
+            location=p.get("location"),
+            created_at=p["created_at"],
+            updated_at=p["created_at"],
+            is_edited=False,
+            likes_count=p.get("likes_count", 0),
+            comments_count=p.get("comments_count", 0),
+            is_liked=p.get("is_liked", False),
+            is_bookmarked=False,
+            is_owner=(p["author_id"] == my_id) if my_id else False
+        ))
+    return responses
+
+# 28. Hashtag Posts Filter
+@router.get("/tags/{tag}", response_model=List[PostResponse])
+async def get_tag_posts(
+    tag: str,
+    limit: int = Query(25, ge=1, le=50),
+    current_user: Optional[dict] = Depends(get_optional_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    my_id = current_user["id"] if current_user else None
+    tag_data = await get_posts_by_hashtag(db, tag, my_id, limit)
+
+    responses = []
+    for p in tag_data:
+        responses.append(PostResponse(
+            id=p["id"],
+            author_id=p["author_id"],
+            author_username=p["author_username"],
+            author_full_name=p["author_full_name"],
+            author_avatar=p.get("author_avatar"),
+            content=p["content"],
+            image_url=p.get("image_url"),
+            media_url=p.get("media_url"),
+            media_type=p.get("media_type", "image"),
+            media_assets=p.get("media_assets", []),
+            tags=p.get("tags", []),
+            location=p.get("location"),
+            created_at=p["created_at"],
+            updated_at=p["created_at"],
+            is_edited=False,
+            likes_count=p.get("likes_count", 0),
+            comments_count=p.get("comments_count", 0),
+            is_liked=p.get("is_liked", False),
+            is_bookmarked=False,
+            is_owner=(p["author_id"] == my_id) if my_id else False
+        ))
+    return responses
+
+# 29. Verified Badge Application (Module 10)
+@router.post("/verification/apply", status_code=status.HTTP_201_CREATED)
+async def apply_for_verification(
+    app_in: VerificationApplicationCreate,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    return await submit_verification_application(db, current_user["id"], app_in.model_dump())
+
+@router.post("/verification/{app_id}/review", status_code=status.HTTP_200_OK)
+async def review_verification(
+    app_id: str,
+    action: str = Query(..., pattern="^(approve|reject)$"),
+    notes: Optional[str] = None,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    # Only admin roles authorized
+    if current_user.get("role") != "admin":
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization required to review verification applications")
+
+    return await review_verification_application(db, app_id, current_user["id"], action, notes)

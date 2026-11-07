@@ -20,7 +20,9 @@ import {
   type CommentResponse, 
   type SocialProfileResponse,
   type UserPublicSummary,
-  type SearchResponse
+  type SearchResponse,
+  type StoryGroupResponse,
+  type SocialNoteResponse
 } from '../../services/apiClient';
 
 export const SocialFeedView: React.FC = () => {
@@ -86,6 +88,50 @@ export const SocialFeedView: React.FC = () => {
   const [reportDescription, setReportDescription] = useState('');
   const [isSubmittingReport, setIsSubmittingReport] = useState(false);
   const [reportSuccessMessage, setReportSuccessMessage] = useState<string | null>(null);
+
+  // Phase 25: Stories & Notes State
+  const [stories, setStories] = useState<StoryGroupResponse[]>([]);
+  const [notes, setNotes] = useState<SocialNoteResponse[]>([]);
+  const [activeStoryGroup, setActiveStoryGroup] = useState<StoryGroupResponse | null>(null);
+  const [activeStoryIndex, setActiveStoryIndex] = useState<number>(0);
+  const [showStoryUploadModal, setShowStoryUploadModal] = useState<boolean>(false);
+  const [newStoryMediaUrl, setNewStoryMediaUrl] = useState<string>('');
+  const [newStoryCaption, setNewStoryCaption] = useState<string>('');
+  const [newStoryIsCloseFriends, setNewStoryIsCloseFriends] = useState<boolean>(false);
+  const [isUploadingStory, setIsUploadingStory] = useState<boolean>(false);
+  const [showNoteModal, setShowNoteModal] = useState<boolean>(false);
+  const [newNoteText, setNewNoteText] = useState<string>('');
+  const [newNoteMusic, setNewNoteMusic] = useState<string>('');
+  const [isPostingNote, setIsPostingNote] = useState<boolean>(false);
+
+  // Phase 25: Verification Modal State
+  const [showVerificationModal, setShowVerificationModal] = useState<boolean>(false);
+  const [verificationFullName, setVerificationFullName] = useState<string>('');
+  const [verificationCategory, setVerificationCategory] = useState<string>('creator');
+  const [verificationDocType, setVerificationDocType] = useState<string>('national_id');
+  const [verificationDocUrl, setVerificationDocUrl] = useState<string>('');
+  const [verificationReason, setVerificationReason] = useState<string>('');
+  const [isSubmittingVerification, setIsSubmittingVerification] = useState<boolean>(false);
+  const [verificationSuccess, setVerificationSuccess] = useState<boolean>(false);
+
+  // Phase 25: Fetch Stories and Notes
+  const fetchStoriesAndNotes = useCallback(async () => {
+    if (!isAuthenticated) return;
+    try {
+      const [storyData, noteData] = await Promise.all([
+        apiClient.getStoriesFeed(),
+        apiClient.getFollowingNotes()
+      ]);
+      setStories(storyData || []);
+      setNotes(noteData || []);
+    } catch (e) {
+      console.warn('Failed to fetch stories or notes:', e);
+    }
+  }, [isAuthenticated]);
+
+  useEffect(() => {
+    fetchStoriesAndNotes();
+  }, [fetchStoriesAndNotes]);
 
   // Fetch Local Drafts
   const currentUserId = user?.id || 'guest';
@@ -523,6 +569,77 @@ export const SocialFeedView: React.FC = () => {
 
   return (
     <div className="max-w-2xl mx-auto w-full space-y-5 pb-12">
+      {/* Phase 25: Social Stories & Notes Tray */}
+      {isAuthenticated && (
+        <div className="p-3 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-md overflow-x-auto scrollbar-none flex items-center space-x-4">
+          {/* Add Story / Post Note Buttons */}
+          <div className="flex flex-col items-center space-y-1 shrink-0">
+            <button
+              onClick={() => setShowStoryUploadModal(true)}
+              className="relative w-14 h-14 rounded-full border-2 border-dashed border-violet-400 p-0.5 flex items-center justify-center hover:border-violet-300 transition group"
+            >
+              {user?.avatar_url ? (
+                <img src={user.avatar_url} alt="You" className="w-full h-full rounded-full object-cover" />
+              ) : (
+                <div className="w-full h-full rounded-full bg-violet-600/30 text-violet-300 font-bold flex items-center justify-center text-xs">
+                  {user?.username ? user.username.slice(0, 2).toUpperCase() : 'ME'}
+                </div>
+              )}
+              <span className="absolute bottom-0 right-0 bg-violet-600 text-white rounded-full p-0.5 text-xs font-bold leading-none shadow">
+                +
+              </span>
+            </button>
+            <span className="text-[11px] text-slate-300 font-medium">Your Story</span>
+          </div>
+
+          {/* Social Notes Pill Shortcut */}
+          <div className="flex flex-col items-center space-y-1 shrink-0">
+            <button
+              onClick={() => setShowNoteModal(true)}
+              className="w-14 h-14 rounded-full border border-white/10 bg-white/5 flex items-center justify-center hover:bg-white/10 transition text-violet-400 text-xs font-bold"
+              title="Post 24h Note"
+            >
+              🎵 Note
+            </button>
+            <span className="text-[11px] text-slate-400 font-medium truncate max-w-[60px]">
+              {notes.find(n => n.user_id === user?.id)?.text || "Add Note"}
+            </span>
+          </div>
+
+          {/* Followed Creators Stories */}
+          {stories.map((group) => (
+            <div
+              key={group.author_id}
+              onClick={() => {
+                setActiveStoryGroup(group);
+                setActiveStoryIndex(0);
+                if (group.stories.length > 0) {
+                  apiClient.viewStory(group.stories[0].id);
+                }
+              }}
+              className="flex flex-col items-center space-y-1 shrink-0 cursor-pointer group"
+            >
+              <div className={`w-14 h-14 rounded-full p-0.5 transition ${
+                group.has_unseen
+                  ? 'bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600'
+                  : 'border border-white/20'
+              }`}>
+                {group.author_avatar ? (
+                  <img src={group.author_avatar} alt={group.author_username} className="w-full h-full rounded-full object-cover border border-black" />
+                ) : (
+                  <div className="w-full h-full rounded-full bg-slate-800 text-white font-bold flex items-center justify-center text-xs border border-black uppercase">
+                    {group.author_username.slice(0, 2)}
+                  </div>
+                )}
+              </div>
+              <span className="text-[11px] text-slate-300 font-medium truncate max-w-[64px]">
+                {group.author_username}
+              </span>
+            </div>
+          ))}
+        </div>
+      )}
+
       {/* Navigation Tabs: Discovery, Following, Reels, Explore, Profile */}
       <div className="flex items-center justify-between p-1.5 rounded-2xl bg-slate-900/60 border border-white/10 backdrop-blur-md overflow-x-auto scrollbar-none">
         <div className="flex space-x-1 w-full min-w-max">
