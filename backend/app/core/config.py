@@ -23,7 +23,10 @@ class Settings(BaseSettings):
     REFRESH_TOKEN_EXPIRE_DAYS: int = 14
 
     CORS_ORIGINS: List[str] = [
+        "https://www.intellidev.in",
+        "https://intellidev.in",
         "https://zynova.intellidev.in",
+        "https://zynovaapp-git-deployment-atlas-vercel-karuppusamy2.vercel.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
         "https://localhost",
