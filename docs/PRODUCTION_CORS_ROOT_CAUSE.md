@@ -107,3 +107,4 @@ access-control-allow-headers: authorization,content-type
    - Approved apex `https://intellidev.in` preflight returns HTTP 200.
    - Unapproved origin preflight (`https://malicious-site.example.com`) fails closed with HTTP 400.
    - Simple GET request receives `access-control-allow-origin`.
+

@@ -55,3 +55,4 @@ Once the deployment updates:
 2. Open `https://www.intellidev.in` in your browser.
 3. Navigate to Food & Dining.
 4. Verify the browser console shows 0 CORS preflight errors, and the restaurant listings render seamlessly.
+

@@ -31,7 +31,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:5173",
         "https://localhost",
         "http://localhost",
-        "capacitor://localhost"
+        "capacitor://localhost",
+        "capacitor://"
     ]
 
     # Shared Rate Limiting & Redis
