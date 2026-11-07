@@ -80,4 +80,12 @@ class Settings(BaseSettings):
     BLOCKCHAIN_MAX_FEE_GWEI: float = 50.0
     BLOCKCHAIN_RPC_TIMEOUT_SECONDS: float = 10.0
 
+    # Phase 24.1: Unified Media Storage (S3-compatible / Cloudflare R2)
+    MEDIA_S3_ACCESS_KEY_ID: Optional[str] = None
+    MEDIA_S3_SECRET_ACCESS_KEY: Optional[str] = None
+    MEDIA_S3_BUCKET: Optional[str] = None
+    MEDIA_S3_REGION: str = "auto"               # "auto" for Cloudflare R2
+    MEDIA_S3_ENDPOINT_URL: Optional[str] = None  # e.g. https://<account>.r2.cloudflarestorage.com
+    MEDIA_CDN_BASE_URL: Optional[str] = None     # e.g. https://cdn.intellidev.in/public
+
 settings = Settings()

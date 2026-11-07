@@ -56,6 +56,9 @@ async def connect_to_database() -> None:
 
         # Setup indexes
         await _setup_indexes()
+        # Phase 24.1 supplemental indexes
+        from app.database.phase24_indexes import setup_phase24_indexes
+        await setup_phase24_indexes(db_manager.db)
     except Exception as e:
         logger.warning(f"Could not connect to MongoDB: {e}. Backend will operate in fallback state for readiness.")
         if db_manager.client:
