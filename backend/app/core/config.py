@@ -49,6 +49,18 @@ class Settings(BaseSettings):
     MASTER_ENCRYPTION_KEY: Optional[str] = "dev_master_key_super_ai_indic_sovereign_32bytes_sec"
     ACTIVE_KEY_VERSION: str = "v1"
 
+    # Production AI Core Engine (Phase 23)
+    AI_DEFAULT_PROVIDER: str = "gemini"  # gemini, openai, anthropic, mock
+    AI_DEFAULT_MODEL: str = "gemini-2.5-flash"
+    GEMINI_API_KEY: Optional[str] = None
+    OPENAI_API_KEY: Optional[str] = None
+    ANTHROPIC_API_KEY: Optional[str] = None
+    AI_MAX_INPUT_TOKENS: int = 4096
+    AI_MAX_OUTPUT_TOKENS: int = 2048
+    AI_MAX_TURNS_PER_HOUR: int = 60
+    AI_INFERENCE_TIMEOUT_SECONDS: float = 45.0
+    AI_ENABLE_AUDIT_LOGGING: bool = True
+
     # Private Cryptographic Audit Ledger (Phase 10)
     AUDIT_LEDGER_ENABLED: bool = True
     AUDIT_LEDGER_SIGNER_KEY_HEX: Optional[str] = None  # 32-byte Ed25519 private key seed (hex)

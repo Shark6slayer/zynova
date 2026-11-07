@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import health, auth, users, preferences, conversations, notifications, chat, social, search, videos, food, shopping, payments, ledger, devices
+from app.api.routes import health, auth, users, preferences, conversations, notifications, chat, social, search, videos, food, shopping, payments, ledger, devices, ai
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -18,6 +18,7 @@ api_router.include_router(shopping.router)
 api_router.include_router(payments.router)
 api_router.include_router(ledger.router)
 api_router.include_router(devices.router)
+api_router.include_router(ai.router)
 
 
 
