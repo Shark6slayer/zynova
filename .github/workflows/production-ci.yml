@@ -1,0 +1,89 @@
+name: Zynova Production CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main, release/* ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  backend-test-and-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: 'pip'
+
+      - name: Install backend dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r backend/requirements.txt
+
+      - name: Run backend security and regression test suite
+        env:
+          ENVIRONMENT: test
+          MONGODB_URI: mongodb://localhost:27017
+          MONGODB_DB_NAME: zynova_test_db
+          JWT_SECRET_KEY: test_indic_sovereign_dev_secret_key_2026_test_only
+          AI_MOCK_MODE: "true"
+          AI_DEFAULT_PROVIDER: mock
+          RATE_LIMIT_FAIL_CLOSED_IN_PROD: "false"
+        run: |
+          pytest -c backend/pytest.ini backend/tests -v --durations=10
+
+  frontend-build-and-typecheck:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run TypeScript typecheck and Vite production build
+        run: npm run build:skip-val
+
+  secret-and-security-scan:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Scan for committed secrets and API keys
+        run: |
+          echo "Scanning working tree for hardcoded API keys..."
+          python -c "
+          import os, re, sys
+          pattern = re.compile(r'(AIza[0-9A-Za-z-_]{35}|sk-[a-zA-Z0-9]{32,}|ghp_[a-zA-Z0-9]{36})')
+          violations = []
+          for root, _, files in os.walk('.'):
+              if any(skip in root for skip in ['.git', 'node_modules', 'venv', 'dist', 'backups', '.pytest_cache']):
+                  continue
+              for f in files:
+                  if f.endswith(('.ts', '.tsx', '.py', '.json', '.yaml', '.yml', '.env.example')):
+                      p = os.path.join(root, f)
+                      try:
+                          with open(p, 'r', encoding='utf-8', errors='ignore') as fh:
+                              for i, line in enumerate(fh, 1):
+                                  if pattern.search(line):
+                                      violations.append(f'{p}:{i}')
+                      except Exception:
+                          pass
+          if violations:
+              print('POTENTIAL SECRET LEAKS DETECTED:', violations)
+              sys.exit(1)
+          print('Clean: No raw production secret keys detected.')
+          "

@@ -15,7 +15,7 @@ async def health_check():
 
 @router.get("/ready")
 async def readiness_check(response: Response):
-    """Verifies critical dependencies such as MongoDB."""
+    """Verifies critical dependencies such as MongoDB and Redis."""
     db = get_database()
     mongo_status = "unavailable"
     if db is None:
@@ -40,12 +40,17 @@ async def readiness_check(response: Response):
     if not is_ready:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
 
+    # Redis readiness check
+    from app.core.rate_limit import get_rate_limiter_health
+    redis_health = await get_rate_limiter_health()
+
     return {
         "status": "ready" if is_ready else "not_ready",
         "database": mongo_status,
         "database_name": db_name,
         "dependencies": {
-            "mongodb": mongo_status
+            "mongodb": mongo_status,
+            "redis": redis_health.get("status", "unknown")
         }
     }
 
