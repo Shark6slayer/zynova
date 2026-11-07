@@ -4,6 +4,7 @@ from datetime import datetime, timezone
 import uuid
 
 from app.core.config import settings
+from app.core.ai_errors import AIErrorCode, AIProviderException
 from app.services.ai_providers import (
     BaseAIProvider,
     MockAIProvider,
@@ -17,14 +18,12 @@ logger = logging.getLogger("zynova.ai_engine")
 
 class AIEngineService:
     """
-    Central orchestration service for Zynova AI Core Engine.
-    Handles:
-    - Provider registry & routing
-    - User rate-limiting & quotas
-    - Conversation management in MongoDB
-    - Context window pruning
-    - User preferences & system prompt assembly
-    - Audit logging
+    Central orchestration service for Zynova AI Core Engine (Hardened).
+    Enforces:
+    - No automatic mock fallback in production: provider failures raise explicit normalized exceptions.
+    - Token tracking and cost accounting in Mongo.
+    - Owner-isolated conversation persistence.
+    - Dynamic context window bounding.
     """
 
     def __init__(self):
@@ -36,16 +35,38 @@ class AIEngineService:
         }
 
     def get_provider(self, provider_id: str) -> BaseAIProvider:
-        """Returns the requested provider or falls back to mock if unconfigured/invalid."""
-        if provider_id in self.providers:
-            provider = self.providers[provider_id]
-            if provider.is_configured():
-                return provider
-        # Graceful fallback to mock if requested provider is unconfigured
-        return self.providers["mock"]
+        """
+        Returns the requested provider.
+        CRITICAL HARDENING: Never silently fallback to mock if a real provider is requested.
+        """
+        if provider_id not in self.providers:
+            raise AIProviderException(
+                code=AIErrorCode.INVALID_REQUEST,
+                message=f"Provider '{provider_id}' is not supported.",
+                provider_id=provider_id,
+                status_code=400
+            )
+
+        provider = self.providers[provider_id]
+        if not provider.is_configured():
+            if provider_id == "mock":
+                raise AIProviderException(
+                    code=AIErrorCode.MOCK_DISABLED_IN_PROD,
+                    message="Mock sandbox is disabled in production.",
+                    provider_id="mock",
+                    status_code=403
+                )
+            raise AIProviderException(
+                code=AIErrorCode.AUTHENTICATION_ERROR,
+                message=f"Provider '{provider_id}' is not configured on this server.",
+                provider_id=provider_id,
+                status_code=401
+            )
+
+        return provider
 
     def list_available_models(self) -> List[Dict[str, Any]]:
-        """Returns a consolidated list of all models across configured providers."""
+        """Returns consolidated models with configuration and sandbox status."""
         available = []
         for pid, provider in self.providers.items():
             is_conf = provider.is_configured()
@@ -92,29 +113,48 @@ class AIEngineService:
             "updated_at": datetime.now(timezone.utc),
             "messages": [],
             "message_count": 0,
-            "total_tokens_consumed": 0,
+            "total_tokens_in": 0,
+            "total_tokens_out": 0,
             "is_archived": False
         }
         await db.ai_conversations.insert_one(conv_doc)
         return conv_doc
 
-    async def append_message(self, user_id: str, conversation_id: str, role: str, content: str, model_used: Optional[str] = None) -> None:
-        """Appends a message to the conversation and updates timestamps."""
+    async def append_message(
+        self,
+        user_id: str,
+        conversation_id: str,
+        role: str,
+        content: str,
+        model_used: Optional[str] = None,
+        tokens_in: Optional[int] = None,
+        tokens_out: Optional[int] = None,
+        is_interrupted: bool = False
+    ) -> None:
+        """Appends a message to the conversation and updates token accounting."""
         db = get_database()
         msg_obj = {
             "id": f"msg_{uuid.uuid4().hex[:10]}",
             "role": role,
             "content": content,
             "model_used": model_used,
+            "tokens_in": tokens_in,
+            "tokens_out": tokens_out,
+            "is_interrupted": is_interrupted,
             "created_at": datetime.now(timezone.utc)
+        }
+        update_fields: Dict[str, Any] = {
+            "$push": {"messages": msg_obj},
+            "$inc": {
+                "message_count": 1,
+                "total_tokens_in": tokens_in or 0,
+                "total_tokens_out": tokens_out or 0
+            },
+            "$set": {"updated_at": datetime.now(timezone.utc)}
         }
         await db.ai_conversations.update_one(
             {"id": conversation_id, "user_id": user_id},
-            {
-                "$push": {"messages": msg_obj},
-                "$inc": {"message_count": 1},
-                "$set": {"updated_at": datetime.now(timezone.utc)}
-            }
+            update_fields
         )
 
     async def prune_context_window(self, messages: List[Dict[str, Any]], max_messages: int = 10) -> List[Dict[str, str]]:

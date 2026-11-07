@@ -1,12 +1,13 @@
 import json
 import logging
-from typing import Optional, List
+from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 
 from app.api.deps import get_current_user
 from app.services.ai_engine_service import ai_engine_service
+from app.core.ai_errors import AIErrorCode, AIProviderException
 from app.core.audit_ledger import record_audit_event
 
 logger = logging.getLogger("zynova.ai_api")
@@ -15,17 +16,10 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 class AIChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     prompt: str = Field(..., min_length=1, max_length=10000, description="User input message")
-    provider: Optional[str] = Field(None, description="Requested provider: gemini, openai, anthropic, mock")
+    provider: Optional[str] = Field("gemini", description="Requested provider: gemini, openai, anthropic, mock")
     model: Optional[str] = Field(None, description="Specific model ID")
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0)
     locale: Optional[str] = Field("en", description="Target Indic language code")
-
-class ConversationResponse(BaseModel):
-    id: str
-    title: str
-    message_count: int
-    updated_at: str
-    last_message: Optional[str] = None
 
 @router.get("/models")
 async def get_available_models():
@@ -67,7 +61,6 @@ async def get_conversation_details(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
     messages = conv.get("messages", [])
-    # Format datetimes
     formatted_msgs = []
     for m in messages:
         dt = m.get("created_at")
@@ -76,6 +69,9 @@ async def get_conversation_details(
             "role": m.get("role"),
             "content": m.get("content"),
             "model_used": m.get("model_used"),
+            "tokens_in": m.get("tokens_in"),
+            "tokens_out": m.get("tokens_out"),
+            "is_interrupted": m.get("is_interrupted", False),
             "created_at": dt.isoformat() if hasattr(dt, "isoformat") else str(dt)
         })
 
@@ -84,6 +80,8 @@ async def get_conversation_details(
         "conversation": {
             "id": conv["id"],
             "title": conv.get("title", "Conversation"),
+            "total_tokens_in": conv.get("total_tokens_in", 0),
+            "total_tokens_out": conv.get("total_tokens_out", 0),
             "messages": formatted_msgs
         }
     }
@@ -107,12 +105,22 @@ async def stream_chat(
 ):
     """
     Primary real-time AI inference endpoint using Server-Sent Events (SSE).
-    Streams chunks token-by-token and persists conversation history in MongoDB.
+    Hardened for normalized error propagation, token accounting, cancellation safety,
+    and zero automatic mock fallback.
     """
     user_id = str(current_user["_id"])
     user_name = current_user.get("full_name") or current_user.get("username", "User")
 
-    # 1. Load or create conversation thread
+    # 1. Resolve provider and validate configuration upfront
+    provider_id = req.provider or "gemini"
+    try:
+        provider = ai_engine_service.get_provider(provider_id)
+    except AIProviderException as e:
+        raise HTTPException(status_code=e.status_code or 400, detail=e.to_dict())
+
+    model = req.model or (provider.get_supported_models()[0]["id"] if provider.get_supported_models() else "default")
+
+    # 2. Load or create conversation thread
     first_title = req.prompt[:30].strip() + ("..." if len(req.prompt) > 30 else "")
     conv = await ai_engine_service.get_or_create_conversation(
         user_id=user_id,
@@ -121,7 +129,7 @@ async def stream_chat(
     )
     conv_id = conv["id"]
 
-    # 2. Persist user message
+    # 3. Persist user prompt
     await ai_engine_service.append_message(
         user_id=user_id,
         conversation_id=conv_id,
@@ -129,18 +137,13 @@ async def stream_chat(
         content=req.prompt
     )
 
-    # 3. Assemble context window & system instructions
+    # 4. Assemble context window & system instructions
     history = conv.get("messages", []) + [{"role": "user", "content": req.prompt}]
     context = await ai_engine_service.prune_context_window(history, max_messages=10)
     system_instruction = ai_engine_service.build_system_instruction(
         user_locale=req.locale or "en",
         user_name=user_name
     )
-
-    # 4. Resolve provider and model
-    provider_id = req.provider or "mock"
-    provider = ai_engine_service.get_provider(provider_id)
-    model = req.model or (provider.get_supported_models()[0]["id"] if provider.get_supported_models() else "default")
 
     # 5. Log audit ledger event
     try:
@@ -162,31 +165,60 @@ async def stream_chat(
     async def event_generator():
         yield f"data: {json.dumps({'type': 'start', 'conversation_id': conv_id, 'model': model, 'provider': provider.provider_id})}\n\n"
         full_response_acc = []
+        tokens_in = None
+        tokens_out = None
+        is_interrupted = False
 
         try:
-            async for token in provider.stream_chat(
+            async for item in provider.stream_chat(
                 messages=context,
                 model=model,
                 temperature=req.temperature or 0.7,
                 system_instruction=system_instruction
             ):
-                full_response_acc.append(token)
-                yield f"data: {json.dumps({'type': 'chunk', 'text': token})}\n\n"
+                item_type = item.get("type", "chunk")
+                if item_type == "chunk":
+                    chunk_text = item.get("text", "")
+                    full_response_acc.append(chunk_text)
+                    yield f"data: {json.dumps({'type': 'chunk', 'text': chunk_text})}\n\n"
+                elif item_type == "token_usage":
+                    tokens_in = item.get("tokens_in")
+                    tokens_out = item.get("tokens_out")
+                    yield f"data: {json.dumps({'type': 'usage', 'tokens_in': tokens_in, 'tokens_out': tokens_out})}\n\n"
 
             full_text = "".join(full_response_acc)
-            # 7. Persist assistant completion to MongoDB
+            # Persist assistant completion to MongoDB
             await ai_engine_service.append_message(
                 user_id=user_id,
                 conversation_id=conv_id,
                 role="assistant",
                 content=full_text,
-                model_used=model
+                model_used=model,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out or len(full_text.split()),
+                is_interrupted=False
             )
             yield f"data: {json.dumps({'type': 'done', 'full_length': len(full_text)})}\n\n"
 
+        except AIProviderException as e:
+            logger.warning(f"AI Provider error in stream: {e.code} - {e.message}")
+            is_interrupted = True
+            partial_text = "".join(full_response_acc)
+            if partial_text:
+                await ai_engine_service.append_message(
+                    user_id=user_id,
+                    conversation_id=conv_id,
+                    role="assistant",
+                    content=partial_text,
+                    model_used=model,
+                    is_interrupted=True
+                )
+            yield f"data: {json.dumps({'type': 'error', 'error_code': e.code.value, 'message': e.message, 'retryable': e.retryable})}\n\n"
+
         except Exception as e:
-            logger.error(f"Error during AI streaming: {e}")
-            yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+            logger.error(f"Unexpected error during AI streaming: {e}")
+            is_interrupted = True
+            yield f"data: {json.dumps({'type': 'error', 'error_code': AIErrorCode.UNKNOWN_PROVIDER_ERROR.value, 'message': 'An internal error occurred during inference.'})}\n\n"
 
     return StreamingResponse(
         event_generator(),

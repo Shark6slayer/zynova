@@ -49,7 +49,8 @@ class Settings(BaseSettings):
     MASTER_ENCRYPTION_KEY: Optional[str] = "dev_master_key_super_ai_indic_sovereign_32bytes_sec"
     ACTIVE_KEY_VERSION: str = "v1"
 
-    # Production AI Core Engine (Phase 23)
+    # Production AI Core Engine (Phase 23 & Phase 23.1 Hardening)
+    AI_MOCK_MODE: bool = False  # Production safety: mock provider disabled by default
     AI_DEFAULT_PROVIDER: str = "gemini"  # gemini, openai, anthropic, mock
     AI_DEFAULT_MODEL: str = "gemini-2.5-flash"
     GEMINI_API_KEY: Optional[str] = None
