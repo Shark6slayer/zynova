@@ -55,7 +55,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return DEFAULT_PREFERENCES;
   });
 
-  const [activeModule, setActiveModule] = useState<NavModuleId>('home');
+  const [activeModule, setActiveModuleState] = useState<NavModuleId>(() => {
+    if (typeof window !== 'undefined') {
+      const hash = window.location.hash.replace('#/', '').replace('#', '');
+      const validModules: NavModuleId[] = [
+        'home', 'ai-assistant', 'search', 'chat', 'social', 'video',
+        'shopping', 'food', 'payments', 'cloud', 'customization', 'notifications', 'settings'
+      ];
+      if (validModules.includes(hash as NavModuleId)) {
+        return hash as NavModuleId;
+      }
+    }
+    return 'home';
+  });
+
+  const setActiveModule = useCallback((module: NavModuleId) => {
+    setActiveModuleState(module);
+    if (typeof window !== 'undefined') {
+      const targetHash = `#/${module}`;
+      if (window.location.hash !== targetHash) {
+        window.history.pushState({ module }, '', targetHash);
+      }
+    }
+  }, []);
+
+  // Browser back/forward navigation sync
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const handlePopState = () => {
+      const hash = window.location.hash.replace('#/', '').replace('#', '');
+      const validModules: NavModuleId[] = [
+        'home', 'ai-assistant', 'search', 'chat', 'social', 'video',
+        'shopping', 'food', 'payments', 'cloud', 'customization', 'notifications', 'settings'
+      ];
+      if (validModules.includes(hash as NavModuleId)) {
+        setActiveModuleState(hash as NavModuleId);
+      } else {
+        setActiveModuleState('home');
+      }
+    };
+
+    window.addEventListener('popstate', handlePopState);
+    return () => window.removeEventListener('popstate', handlePopState);
+  }, []);
   const [searchQuery, setSearchQuery] = useState('');
   const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
   const [isMobileNavOpen, setIsMobileNavOpen] = useState(false);

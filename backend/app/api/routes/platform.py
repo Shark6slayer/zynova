@@ -23,9 +23,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, UploadFile, File, 
 from pydantic import BaseModel, Field
 from typing import Any, Dict, List, Optional
 from datetime import datetime, timezone
+from bson import ObjectId
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, get_optional_current_user
 from app.database.client import get_database
+from app.schemas.all_schemas import ShareMetadataResponse
 from app.services.identity_service import (
     get_or_init_unified_profile,
     update_social_profile,
@@ -309,3 +311,177 @@ async def delete_asset(
         raise HTTPException(status_code=503, detail="Database unavailable")
     await delete_media_asset(db, asset_id, current_user["id"])
     return {"status": "deleted", "asset_id": asset_id}
+
+
+# ---------------------------------------------------------------------------
+# Cross-Platform Content Sharing & Deep Link Resolution (Phase 28)
+# ---------------------------------------------------------------------------
+
+@router.get("/share/{content_type}/{content_id}", response_model=ShareMetadataResponse)
+async def resolve_share_link(
+    content_type: str,
+    content_id: str,
+    current_user: Optional[dict] = Depends(get_optional_current_user)
+):
+    """
+    Unified Share & Deep-Link Resolution Gateway — Phase 28:
+    Resolves public preview metadata and verified deep links for:
+    post, reel, story, video, short, channel, profile, community.
+    Enforces authorization:
+    - Blocked users cannot view content.
+    - Private posts/videos require authenticated ownership or approved follow.
+    - Expired stories return 404.
+    """
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    my_id = current_user["id"] if current_user else None
+    blocked_ids = set()
+    if my_id:
+        blocked_ids = set(await get_blocked_users(db, my_id))
+
+    base_app_url = "https://zynova.intellidev.in"
+
+    if content_type in ("post", "reel"):
+        try:
+            doc = await db.posts.find_one({"_id": ObjectId(content_id)})
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid content ID")
+        if not doc:
+            raise HTTPException(status_code=404, detail="Content not found or deleted")
+        if doc.get("author_id") in blocked_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        is_reel = doc.get("media_type") == "video"
+        title = f"{'Reel' if is_reel else 'Post'} by {doc.get('author_full_name', 'Zynova User')}"
+        deep_link = f"/reels/{content_id}" if is_reel else f"/post/{content_id}"
+
+        return ShareMetadataResponse(
+            share_url=f"{base_app_url}{deep_link}",
+            content_type="reel" if is_reel else "post",
+            title=title,
+            description=doc.get("content", "")[:200],
+            thumbnail_url=doc.get("thumbnail_url") or doc.get("image_url"),
+            deep_link=deep_link,
+            is_public=True,
+            author_name=doc.get("author_full_name")
+        )
+
+    elif content_type in ("video", "short"):
+        video_filter = None
+        if len(content_id) == 24:
+            try:
+                video_filter = {"_id": ObjectId(content_id)}
+            except Exception:
+                pass
+        if not video_filter:
+            video_filter = {"_id": content_id}
+
+        try:
+            doc = await db.videos.find_one(video_filter)
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid video ID")
+        if not doc:
+            raise HTTPException(status_code=404, detail="Video not found or removed")
+        if doc.get("owner_id") in blocked_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
+        
+        # Privacy check
+        if doc.get("visibility") == "private":
+            if not my_id or my_id != doc.get("owner_id"):
+                raise HTTPException(status_code=403, detail="This video is private")
+
+        is_short = doc.get("is_short", False)
+        deep_link = f"/shorts/{content_id}" if is_short else f"/videos/{content_id}"
+
+        return ShareMetadataResponse(
+            share_url=f"{base_app_url}{deep_link}",
+            content_type="short" if is_short else "video",
+            title=doc.get("title", "Video on Zynova"),
+            description=(doc.get("description") or "")[:200],
+            thumbnail_url=doc.get("thumbnail_url"),
+            deep_link=deep_link,
+            is_public=doc.get("visibility") == "public",
+            author_name=doc.get("channel_name")
+        )
+
+    elif content_type == "channel":
+        doc = await db.creator_channels.find_one({
+            "$or": [{"handle": content_id}, {"_id": ObjectId(content_id) if len(content_id) == 24 else None}]
+        })
+        if not doc:
+            raise HTTPException(status_code=404, detail="Channel not found")
+        if doc.get("owner_id") in blocked_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        deep_link = f"/channel/{doc.get('handle')}"
+        return ShareMetadataResponse(
+            share_url=f"{base_app_url}{deep_link}",
+            content_type="channel",
+            title=f"{doc.get('name')} (@{doc.get('handle')})",
+            description=(doc.get("description") or "")[:200],
+            thumbnail_url=doc.get("avatar_url") or doc.get("banner_url"),
+            deep_link=deep_link,
+            is_public=True,
+            author_name=doc.get("name")
+        )
+
+    elif content_type == "profile":
+        user_filter = None
+        if len(content_id) == 24:
+            try:
+                user_filter = {"_id": ObjectId(content_id)}
+            except Exception:
+                pass
+        if not user_filter:
+            user_filter = {"username": content_id}
+
+        doc = await db.users.find_one(user_filter)
+        if not doc or not doc.get("is_active", True):
+            raise HTTPException(status_code=404, detail="User profile not found")
+        user_id_str = str(doc["_id"])
+        if user_id_str in blocked_ids:
+            raise HTTPException(status_code=403, detail="Access denied")
+
+        deep_link = f"/profile/{user_id_str}"
+        return ShareMetadataResponse(
+            share_url=f"{base_app_url}{deep_link}",
+            content_type="profile",
+            title=f"{doc.get('full_name')} (@{doc.get('username')})",
+            description=doc.get("bio") or "Connect with me on Zynova",
+            thumbnail_url=doc.get("avatar_url"),
+            deep_link=deep_link,
+            is_public=True,
+            author_name=doc.get("full_name")
+        )
+
+    elif content_type == "community":
+        try:
+            doc = await db.connect_communities.find_one({"_id": ObjectId(content_id)})
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid community ID")
+        if not doc:
+            raise HTTPException(status_code=404, detail="Community not found")
+        
+        # Privacy check for private community
+        if doc.get("is_private", False):
+            member_ids = doc.get("member_ids", [])
+            admin_ids = doc.get("admin_ids", [])
+            if not my_id or (my_id not in member_ids and my_id not in admin_ids):
+                raise HTTPException(status_code=403, detail="Private community access restricted")
+
+        deep_link = f"/communities/{content_id}"
+        return ShareMetadataResponse(
+            share_url=f"{base_app_url}{deep_link}",
+            content_type="community",
+            title=doc.get("name", "Community on Zynova"),
+            description=(doc.get("description") or "")[:200],
+            thumbnail_url=doc.get("icon_url"),
+            deep_link=deep_link,
+            is_public=not doc.get("is_private", False),
+            author_name=doc.get("name")
+        )
+
+    else:
+        raise HTTPException(status_code=400, detail=f"Unsupported share content type: {content_type}")

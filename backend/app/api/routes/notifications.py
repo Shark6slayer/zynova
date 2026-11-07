@@ -6,7 +6,8 @@ from bson import ObjectId
 from app.schemas.all_schemas import (
     NotificationResponse,
     NotificationListResponse,
-    NotificationUnreadCountResponse
+    NotificationUnreadCountResponse,
+    NotificationPreferencesModel
 )
 from app.api.deps import get_current_user
 from app.database.client import get_database
@@ -35,7 +36,7 @@ def _format_time_ago(dt: datetime) -> str:
 # 1. List Notifications (Paginated with Category/Read Filtering & Relative Timestamps)
 @router.get("", response_model=NotificationListResponse)
 async def list_notifications(
-    category: Optional[str] = Query(None, pattern="^(all|chat|social|food|shopping|system)$"),
+    category: Optional[str] = Query(None, pattern="^(all|chat|connect|social|video|food|shopping|system)$"),
     unread_only: bool = Query(False),
     page: int = Query(1, ge=1),
     limit: int = Query(20, ge=1, le=50),
@@ -208,3 +209,33 @@ async def clear_read_notifications(current_user: dict = Depends(get_current_user
         "read": True
     })
     return {"status": "cleared", "deleted_count": res.deleted_count}
+
+# 7. Unified Notification Preferences (Phase 28)
+@router.get("/preferences", response_model=NotificationPreferencesModel)
+async def get_notification_preferences(current_user: dict = Depends(get_current_user)):
+    db = get_database()
+    if db is None:
+        return NotificationPreferencesModel()
+    prefs = await db.notification_preferences.find_one({"user_id": current_user["id"]})
+    if not prefs:
+        return NotificationPreferencesModel()
+    return NotificationPreferencesModel(**{k: v for k, v in prefs.items() if k in NotificationPreferencesModel.model_fields})
+
+@router.patch("/preferences", response_model=NotificationPreferencesModel)
+async def update_notification_preferences(
+    payload: NotificationPreferencesModel,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+    
+    update_data = payload.model_dump()
+    update_data["updated_at"] = datetime.now(timezone.utc)
+    
+    await db.notification_preferences.update_one(
+        {"user_id": current_user["id"]},
+        {"$set": update_data},
+        upsert=True
+    )
+    return payload

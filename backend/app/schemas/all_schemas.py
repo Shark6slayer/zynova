@@ -459,7 +459,7 @@ class ReportResponse(BaseModel):
 # Platform Search Engine Schemas
 class SearchResultItem(BaseModel):
     id: str
-    result_type: str  # "person" or "post"
+    result_type: str  # "person", "post", "reel", "video", "short", "channel", "community", "hashtag"
     title: str
     subtitle: Optional[str] = None
     excerpt: str
@@ -475,6 +475,39 @@ class SearchResponse(BaseModel):
     total_count: int
     has_more: bool
     results: List[SearchResultItem]
+
+class SearchHistoryItem(BaseModel):
+    id: str
+    query: str
+    category: str
+    created_at: datetime
+
+# Platform Share Schemas (Phase 28 Cross-Platform Sharing)
+class ShareMetadataResponse(BaseModel):
+    share_url: str
+    content_type: str  # "post", "reel", "story", "video", "short", "channel", "profile", "community"
+    title: str
+    description: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    deep_link: str
+    is_public: bool
+    author_name: Optional[str] = None
+
+# Unified Notification Preferences (Phase 28)
+class NotificationPreferencesModel(BaseModel):
+    social_likes: bool = True
+    social_comments: bool = True
+    social_follows: bool = True
+    social_mentions: bool = True
+    connect_messages: bool = True
+    connect_group_activity: bool = True
+    connect_calls: bool = True
+    video_subscriptions: bool = True
+    video_uploads: bool = True
+    video_comments: bool = True
+    security_alerts: bool = True
+    preview_privacy: str = "full"  # "full", "sender_only", "hidden"
+
 
 # Video Platform Schemas (Phase 27 Extended)
 class ChannelCreatePayload(BaseModel):

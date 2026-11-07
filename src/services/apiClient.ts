@@ -307,7 +307,7 @@ export interface ReportResponse {
 // Platform Search Engine Interfaces
 export interface SearchResultItem {
   id: string;
-  result_type: 'person' | 'post';
+  result_type: 'person' | 'post' | 'reel' | 'video' | 'short' | 'channel' | 'community' | 'hashtag';
   title: string;
   subtitle?: string | null;
   excerpt: string;
@@ -324,6 +324,32 @@ export interface SearchResponse {
   total_count: number;
   has_more: boolean;
   results: SearchResultItem[];
+}
+
+export interface ShareMetadataResponse {
+  share_url: string;
+  content_type: string;
+  title: string;
+  description?: string | null;
+  thumbnail_url?: string | null;
+  deep_link: string;
+  is_public: boolean;
+  author_name?: string | null;
+}
+
+export interface NotificationPreferences {
+  social_likes: boolean;
+  social_comments: boolean;
+  social_follows: boolean;
+  social_mentions: boolean;
+  connect_messages: boolean;
+  connect_group_activity: boolean;
+  connect_calls: boolean;
+  video_subscriptions: boolean;
+  video_uploads: boolean;
+  video_comments: boolean;
+  security_alerts: boolean;
+  preview_privacy: 'full' | 'sender_only' | 'hidden';
 }
 
 export interface ChannelResponse {
@@ -1347,7 +1373,7 @@ class ApiClient {
   // --- Platform Search Engine Methods ---
   async searchPlatform(
     query: string,
-    type: 'all' | 'people' | 'posts' = 'all',
+    type: 'all' | 'people' | 'posts' | 'reels' | 'videos' | 'shorts' | 'channels' | 'communities' | 'hashtags' = 'all',
     limit: number = 20,
     offset: number = 0,
     sort: 'recency' | 'relevance' = 'recency',
@@ -1358,6 +1384,33 @@ class ApiClient {
       `/search?q=${encodedQ}&type=${type}&limit=${limit}&offset=${offset}&sort=${sort}`,
       { signal }
     );
+  }
+
+  async getSearchHistory(limit: number = 20): Promise<Array<{ id: string; query: string; category: string; created_at: string }>> {
+    return this.request(`/search/history?limit=${limit}`);
+  }
+
+  async deleteSearchHistoryItem(itemId: string): Promise<{ status: string; id: string }> {
+    return this.request(`/search/history/${itemId}`, { method: 'DELETE' });
+  }
+
+  async clearAllSearchHistory(): Promise<{ status: string; deleted_count: number }> {
+    return this.request('/search/history', { method: 'DELETE' });
+  }
+
+  async resolveShareLink(contentType: string, contentId: string): Promise<ShareMetadataResponse> {
+    return this.request<ShareMetadataResponse>(`/platform/share/${contentType}/${contentId}`);
+  }
+
+  async getNotificationPreferences(): Promise<NotificationPreferences> {
+    return this.request<NotificationPreferences>('/notifications/preferences');
+  }
+
+  async updateNotificationPreferences(prefs: Partial<NotificationPreferences>): Promise<NotificationPreferences> {
+    return this.request<NotificationPreferences>('/notifications/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify(prefs)
+    });
   }
 
   // --- Video Platform Methods ---

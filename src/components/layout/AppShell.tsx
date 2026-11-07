@@ -5,7 +5,7 @@ import { TopBar } from './TopBar';
 import { CommandPalette } from '../overlays/CommandPalette';
 import { OnboardingModal } from '../overlays/OnboardingModal';
 import { 
-  Home, Search, MessageSquare, 
+  Home, Search, MessageSquare, Share2, Video,
   ShoppingBag, Utensils, CreditCard, Menu 
 } from 'lucide-react';
 import type { NavModuleId } from '../../types';
@@ -90,11 +90,10 @@ export const AppShell: React.FC = () => {
 
   const mobileNavDestinations: Array<{ id: NavModuleId; labelKey: string; fallback: string; icon: any }> = [
     { id: 'home', labelKey: 'nav.home', fallback: 'Home', icon: Home },
+    { id: 'social', labelKey: 'nav.social', fallback: 'Social', icon: Share2 },
+    { id: 'chat', labelKey: 'nav.chat', fallback: 'Connect', icon: MessageSquare },
+    { id: 'video', labelKey: 'nav.video', fallback: 'Video', icon: Video },
     { id: 'search', labelKey: 'nav.search', fallback: 'Search', icon: Search },
-    { id: 'chat', labelKey: 'nav.chat', fallback: 'Chat', icon: MessageSquare },
-    { id: 'shopping', labelKey: 'nav.shopping', fallback: 'Zaviro', icon: ShoppingBag },
-    { id: 'food', labelKey: 'nav.food', fallback: 'Food', icon: Utensils },
-    { id: 'payments', labelKey: 'nav.payments', fallback: 'Pay', icon: CreditCard },
   ];
 
   return (
