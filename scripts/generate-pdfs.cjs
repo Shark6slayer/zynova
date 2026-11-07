@@ -29,7 +29,7 @@ function parseMarkdown(md) {
   html = html.replace(/\*([^*]+)\*/g, '<em>$1</em>');
 
   // Blockquotes
-  html = html.replace(/^\> (.*$)/gim, '<blockquote>$1</blockquote>');
+  html = html.replace(/^> (.*$)/gim, '<blockquote>$1</blockquote>');
 
   // Horizontal Rules
   html = html.replace(/^---$/gim, '<hr/>');
