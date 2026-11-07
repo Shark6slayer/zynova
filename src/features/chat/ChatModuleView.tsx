@@ -3,7 +3,7 @@ import {
   Search, Phone, Video, MoreVertical, Send, Paperclip, 
   Smile, Mic, CheckCheck, Check, Users, Shield, Pin, 
   Plus, Edit2, Trash2, X, AlertCircle, Loader2, MessageSquare, LogIn,
-  RefreshCw
+  RefreshCw, Archive, Lock, Radio, MessageCircle, Heart, ThumbsUp
 } from 'lucide-react';
 import { useAuth } from '../../context/AuthContext';
 import { useApp } from '../../context/AppContext';
@@ -11,14 +11,19 @@ import {
   apiClient, 
   type ChatConversationResponse, 
   type ChatMessageResponse, 
-  type UserPublicSummary 
+  type UserPublicSummary,
+  type ConnectStatusResponse,
+  type CommunityResponse,
+  type CallHistoryResponse
 } from '../../services/apiClient';
 import { chatWebSocketService } from '../../services/chatWebSocket';
 
 export const ChatModuleView: React.FC = () => {
   const { user, isAuthenticated, openLoginModal } = useAuth();
-
   const { refreshUnreadChatCount } = useApp();
+
+  // Navigation tab for Connect
+  const [activeTab, setActiveTab] = useState<'chats' | 'status' | 'communities' | 'calls' | 'archived'>('chats');
 
   // State
   const [conversations, setConversations] = useState<ChatConversationResponse[]>([]);
@@ -31,6 +36,22 @@ export const ChatModuleView: React.FC = () => {
   const [isSending, setIsSending] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
 
+  // Status & Updates tab state
+  const [statusFeed, setStatusFeed] = useState<ConnectStatusResponse[]>([]);
+  const [statusCaption, setStatusCaption] = useState('');
+  const [isPostingStatus, setIsPostingStatus] = useState(false);
+
+  // Communities tab state
+  const [communities, setCommunities] = useState<CommunityResponse[]>([]);
+
+  // Calls tab state
+  const [callHistory, setCallHistory] = useState<CallHistoryResponse[]>([]);
+
+  // Group creation modal
+  const [isGroupModalOpen, setIsGroupModalOpen] = useState(false);
+  const [groupName, setGroupName] = useState('');
+  const [groupDesc, setGroupDesc] = useState('');
+
   // User Search Modal
   const [isSearchModalOpen, setIsSearchModalOpen] = useState(false);
   const [userSearchText, setUserSearchText] = useState('');
@@ -40,6 +61,10 @@ export const ChatModuleView: React.FC = () => {
   // Edit Message
   const [editingMessageId, setEditingMessageId] = useState<string | null>(null);
   const [editingText, setEditingText] = useState('');
+
+  // Chat Pin modal
+  const [lockPinInput, setLockPinInput] = useState('');
+  const [lockingConvId, setLockingConvId] = useState<string | null>(null);
 
   const messagesEndRef = useRef<HTMLDivElement>(null);
   const isMountedRef = useRef(true);

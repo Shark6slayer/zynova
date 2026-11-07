@@ -123,10 +123,20 @@ class ChatConversationCreate(BaseModel):
     recipient_id: str
 
 class ChatMessageCreate(BaseModel):
-    text: str = Field(..., min_length=1, max_length=2000)
+    text: Optional[str] = Field(None, max_length=2000)
+    media_url: Optional[str] = Field(None, max_length=500)
+    media_type: Optional[str] = Field("text", pattern="^(text|image|video|audio|voice|document)$")
+    file_name: Optional[str] = Field(None, max_length=255)
+    file_size_bytes: Optional[int] = None
+    reply_to_id: Optional[str] = None
+    forward_from_id: Optional[str] = None
+    client_message_id: Optional[str] = None
 
 class ChatMessageUpdate(BaseModel):
     text: str = Field(..., min_length=1, max_length=2000)
+
+class MessageReactionPayload(BaseModel):
+    emoji: str = Field(..., min_length=1, max_length=16)
 
 class ChatMessageResponse(BaseModel):
     id: str
@@ -136,27 +146,150 @@ class ChatMessageResponse(BaseModel):
     sender_full_name: str
     sender_avatar: Optional[str] = None
     text: str
+    media_url: Optional[str] = None
+    media_type: str = "text"
+    file_name: Optional[str] = None
+    file_size_bytes: Optional[int] = None
+    reply_to_id: Optional[str] = None
+    forward_from_id: Optional[str] = None
+    client_message_id: Optional[str] = None
     created_at: datetime
     updated_at: datetime
     is_edited: bool = False
     is_deleted: bool = False
+    is_pinned: bool = False
+    delivery_status: str = "sent"  # "sent", "delivered", "read"
+    delivered_to: List[str] = []
     read_by: List[str] = []
+    reactions: Dict[str, str] = {}  # user_id -> emoji
 
 class LastMessageSummary(BaseModel):
     id: str
     sender_id: str
     text: str
+    media_type: Optional[str] = "text"
+    delivery_status: Optional[str] = "sent"
     created_at: datetime
 
 class ChatConversationResponse(BaseModel):
     id: str
-    type: str = "direct"
+    type: str = "direct"  # "direct", "group"
+    name: Optional[str] = None
+    description: Optional[str] = None
+    picture_url: Optional[str] = None
     participants: List[str]
     participant_meta: dict[str, UserPublicSummary]
+    admin_ids: List[str] = []
+    community_id: Optional[str] = None
+    is_archived: bool = False
+    is_locked: bool = False
+    pinned_message_id: Optional[str] = None
     last_message: Optional[LastMessageSummary] = None
     unread_count: int = 0
     created_at: datetime
     updated_at: datetime
+
+# Connect Extended Schemas (Phase 26)
+class GroupCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    picture_url: Optional[str] = Field(None, max_length=500)
+    participant_ids: List[str] = Field(..., min_length=1)
+    community_id: Optional[str] = None
+
+class GroupUpdatePayload(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    picture_url: Optional[str] = Field(None, max_length=500)
+
+class GroupMemberActionPayload(BaseModel):
+    user_id: str
+
+class CommunityCreatePayload(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    description: Optional[str] = Field(None, max_length=500)
+    picture_url: Optional[str] = Field(None, max_length=500)
+    group_ids: Optional[List[str]] = None
+
+class CommunityResponse(BaseModel):
+    id: str
+    name: str
+    description: Optional[str] = None
+    picture_url: Optional[str] = None
+    creator_id: str
+    admin_ids: List[str]
+    group_ids: List[str]
+    announcement_group_id: Optional[str] = None
+    created_at: datetime
+    updated_at: datetime
+
+class ConnectStatusCreatePayload(BaseModel):
+    media_url: Optional[str] = Field(None, max_length=500)
+    media_type: str = Field("text", pattern="^(text|image|video)$")
+    caption: Optional[str] = Field(None, max_length=500)
+    bg_color: Optional[str] = Field(None, max_length=30)
+    font_style: Optional[str] = Field(None, max_length=30)
+    privacy: str = Field("contacts", pattern="^(contacts|close_friends|public)$")
+
+class ConnectStatusResponse(BaseModel):
+    id: str
+    user_id: str
+    user_username: str
+    user_full_name: str
+    user_avatar: Optional[str] = None
+    media_url: Optional[str] = None
+    media_type: str = "text"
+    caption: Optional[str] = None
+    bg_color: Optional[str] = None
+    font_style: Optional[str] = None
+    privacy: str = "contacts"
+    viewers_count: int = 0
+    created_at: datetime
+    expires_at: datetime
+    has_viewed: bool = False
+
+class LockChatPayload(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=32)
+
+class UnlockChatPayload(BaseModel):
+    pin: str = Field(..., min_length=4, max_length=32)
+
+class CallInitiatePayload(BaseModel):
+    conversation_id: str
+    call_type: str = Field("voice", pattern="^(voice|video)$")
+    recipient_id: Optional[str] = None  # None for group calls
+
+class CallSignalPayload(BaseModel):
+    call_id: str
+    signal_type: str = Field(..., pattern="^(offer|answer|candidate|reject|end|mute)$")
+    payload: Dict[str, Any]
+
+class CallHistoryResponse(BaseModel):
+    id: str
+    conversation_id: str
+    caller_id: str
+    caller_name: str
+    caller_avatar: Optional[str] = None
+    participants: List[str]
+    call_type: str  # "voice" or "video"
+    status: str     # "missed", "completed", "rejected", "busy"
+    duration_seconds: int = 0
+    created_at: datetime
+    ended_at: Optional[datetime] = None
+
+class E2EEPrekeyBundlePayload(BaseModel):
+    identity_key_pub: str
+    signed_prekey_pub: str
+    signed_prekey_sig: Optional[str] = None
+    one_time_prekeys: List[Dict[str, Any]]
+
+class E2EEPrekeyBundleResponse(BaseModel):
+    user_id: str
+    device_id: Optional[str] = None
+    identity_key_pub: str
+    signed_prekey_pub: str
+    signed_prekey_sig: Optional[str] = None
+    one_time_prekey: Optional[Dict[str, Any]] = None
 
 # Social Network Schemas
 class SocialProfileResponse(BaseModel):

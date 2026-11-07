@@ -101,8 +101,16 @@ export interface LastMessageSummary {
 export interface ChatConversationResponse {
   id: string;
   type: string;
+  name?: string | null;
+  description?: string | null;
+  picture_url?: string | null;
   participants: string[];
   participant_meta: Record<string, UserPublicSummary>;
+  admin_ids?: string[];
+  community_id?: string | null;
+  is_archived?: boolean;
+  is_locked?: boolean;
+  pinned_message_id?: string | null;
   last_message?: LastMessageSummary | null;
   unread_count: number;
   created_at: string;
@@ -117,11 +125,67 @@ export interface ChatMessageResponse {
   sender_full_name: string;
   sender_avatar?: string | null;
   text: string;
+  media_url?: string | null;
+  media_type?: string;
+  file_name?: string | null;
+  file_size_bytes?: number | null;
+  reply_to_id?: string | null;
+  forward_from_id?: string | null;
+  client_message_id?: string | null;
   created_at: string;
   updated_at: string;
   is_edited: boolean;
   is_deleted: boolean;
+  is_pinned?: boolean;
+  delivery_status?: 'sent' | 'delivered' | 'read';
+  delivered_to?: string[];
   read_by: string[];
+  reactions?: Record<string, string>;
+}
+
+export interface ConnectStatusResponse {
+  id: string;
+  user_id: string;
+  user_username: string;
+  user_full_name: string;
+  user_avatar?: string | null;
+  media_url?: string | null;
+  media_type: string;
+  caption?: string | null;
+  bg_color?: string | null;
+  font_style?: string | null;
+  privacy: string;
+  viewers_count: number;
+  created_at: string;
+  expires_at: string;
+  has_viewed: boolean;
+}
+
+export interface CommunityResponse {
+  id: string;
+  name: string;
+  description?: string | null;
+  picture_url?: string | null;
+  creator_id: string;
+  admin_ids: string[];
+  group_ids: string[];
+  announcement_group_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CallHistoryResponse {
+  id: string;
+  conversation_id: string;
+  caller_id: string;
+  caller_name: string;
+  caller_avatar?: string | null;
+  participants: string[];
+  call_type: string;
+  status: string;
+  duration_seconds: number;
+  created_at: string;
+  ended_at?: string | null;
 }
 
 // Social Network Interfaces
@@ -883,8 +947,28 @@ class ApiClient {
     });
   }
 
-  async listConversations(limit: number = 50): Promise<ChatConversationResponse[]> {
-    return this.request<ChatConversationResponse[]>(`/chat/conversations?limit=${limit}`);
+  async listConversations(limit: number = 50, archived: boolean = false): Promise<ChatConversationResponse[]> {
+    return this.request<ChatConversationResponse[]>(`/chat/conversations?limit=${limit}&archived=${archived}`);
+  }
+
+  async createGroupChat(payload: { name: string; description?: string; picture_url?: string; participant_ids: string[]; community_id?: string }): Promise<ChatConversationResponse> {
+    return this.request<ChatConversationResponse>('/chat/groups', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async addGroupMember(conversationId: string, userId: string): Promise<void> {
+    await this.request(`/chat/groups/${conversationId}/members`, {
+      method: 'POST',
+      body: JSON.stringify({ user_id: userId }),
+    });
+  }
+
+  async removeGroupMember(conversationId: string, userId: string): Promise<void> {
+    await this.request(`/chat/groups/${conversationId}/members/${userId}`, {
+      method: 'DELETE',
+    });
   }
 
   async getChatMessages(conversationId: string, limit: number = 40, before?: string): Promise<ChatMessageResponse[]> {
@@ -895,11 +979,108 @@ class ApiClient {
     return this.request<ChatMessageResponse[]>(url);
   }
 
-  async sendChatMessage(conversationId: string, text: string): Promise<ChatMessageResponse> {
+  async sendChatMessage(
+    conversationId: string,
+    text?: string,
+    options?: {
+      media_url?: string;
+      media_type?: string;
+      file_name?: string;
+      file_size_bytes?: number;
+      reply_to_id?: string;
+      forward_from_id?: string;
+      client_message_id?: string;
+    }
+  ): Promise<ChatMessageResponse> {
     return this.request<ChatMessageResponse>(`/chat/conversations/${conversationId}/messages`, {
       method: 'POST',
-      body: JSON.stringify({ text }),
+      body: JSON.stringify({ text, ...options }),
     });
+  }
+
+  async reactToMessage(messageId: string, emoji: string): Promise<void> {
+    await this.request(`/chat/messages/${messageId}/react`, {
+      method: 'POST',
+      body: JSON.stringify({ emoji }),
+    });
+  }
+
+  async pinChatMessage(conversationId: string, messageId: string): Promise<{ pinned_message_id: string | null }> {
+    return this.request(`/chat/conversations/${conversationId}/messages/${messageId}/pin`, {
+      method: 'POST',
+    });
+  }
+
+  async lockConversation(conversationId: string, pin: string): Promise<void> {
+    await this.request(`/chat/conversations/${conversationId}/lock`, {
+      method: 'POST',
+      body: JSON.stringify({ pin }),
+    });
+  }
+
+  async unlockConversation(conversationId: string, pin: string): Promise<{ unlocked: boolean }> {
+    return this.request(`/chat/conversations/${conversationId}/unlock`, {
+      method: 'POST',
+      body: JSON.stringify({ pin }),
+    });
+  }
+
+  async toggleArchiveConversation(conversationId: string): Promise<{ status: string }> {
+    return this.request(`/chat/conversations/${conversationId}/archive`, {
+      method: 'POST',
+    });
+  }
+
+  async createConnectStatus(payload: {
+    media_url?: string;
+    media_type: string;
+    caption?: string;
+    bg_color?: string;
+    privacy?: string;
+  }): Promise<ConnectStatusResponse> {
+    return this.request<ConnectStatusResponse>('/chat/status', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async getConnectStatusFeed(): Promise<ConnectStatusResponse[]> {
+    return this.request<ConnectStatusResponse[]>('/chat/status/feed');
+  }
+
+  async viewConnectStatus(statusId: string): Promise<void> {
+    await this.request(`/chat/status/${statusId}/view`, {
+      method: 'POST',
+    });
+  }
+
+  async createCommunity(payload: { name: string; description?: string; picture_url?: string; group_ids?: string[] }): Promise<CommunityResponse> {
+    return this.request<CommunityResponse>('/chat/communities', {
+      method: 'POST',
+      body: JSON.stringify(payload),
+    });
+  }
+
+  async listCommunities(): Promise<CommunityResponse[]> {
+    return this.request<CommunityResponse[]>('/chat/communities');
+  }
+
+  async initiateCall(conversationId: string, callType: 'voice' | 'video', recipientId?: string): Promise<CallHistoryResponse> {
+    return this.request<CallHistoryResponse>('/chat/calls/initiate', {
+      method: 'POST',
+      body: JSON.stringify({ conversation_id: conversationId, call_type: callType, recipient_id: recipientId }),
+    });
+  }
+
+  async sendCallSignal(callId: string, signalType: string, payload: any): Promise<void> {
+    await this.request('/chat/calls/signal', {
+      method: 'POST',
+      body: JSON.stringify({ call_id: callId, signal_type: signalType, payload }),
+    });
+  }
+
+  async getCallHistory(): Promise<CallHistoryResponse[]> {
+    return this.request<CallHistoryResponse[]>('/chat/calls/history');
   }
 
   async editChatMessage(messageId: string, text: string): Promise<ChatMessageResponse> {
