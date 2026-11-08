@@ -35,6 +35,7 @@ const EN_CATALOG: TranslationDictionary = {
 
   // Common UI Actions & States
   'common.search_placeholder': 'Ask Zynova anything or search services (Ctrl+K)...',
+  'common.search_placeholder_short': 'Search Zynova...',
   'common.demo_badge': 'DEMO ENVIRONMENT',
   'common.demo_warning': 'This module uses interactive client-side demo state. No live transactions or external API keys required.',
   'common.save': 'Save Changes',

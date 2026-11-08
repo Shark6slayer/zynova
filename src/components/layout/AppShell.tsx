@@ -116,7 +116,7 @@ export const AppShell: React.FC = () => {
             onClick={() => setIsMobileNavOpen(false)} 
             aria-hidden="true"
           />
-          <div className="relative z-50 h-full max-w-[80vw] animate-in slide-in-from-left duration-300">
+          <div className="relative z-50 h-full w-[85vw] max-w-[360px] animate-in slide-in-from-left duration-300">
             <Sidebar isMobileDrawer={true} onCloseMobile={() => setIsMobileNavOpen(false)} />
           </div>
         </div>
@@ -154,7 +154,7 @@ export const AppShell: React.FC = () => {
         {/* Mobile Sticky Bottom Navigation Bar */}
         <nav 
           aria-label="Mobile Bottom Navigation"
-          className={`md:hidden fixed bottom-0 inset-x-0 h-16 pb-safe border-t ${activeTheme.borderClass} ${activeTheme.surfaceClass} flex items-center justify-around px-2 z-30 shadow-2xl`}
+          className={`md:hidden fixed bottom-0 inset-x-0 h-16 pb-[max(0.5rem,env(safe-area-inset-bottom,0px))] border-t ${activeTheme.borderClass} ${activeTheme.surfaceClass} flex items-center justify-around px-1 z-30 shadow-2xl`}
         >
           {mobileNavDestinations.map((m) => {
             const Icon = m.icon;
@@ -165,7 +165,7 @@ export const AppShell: React.FC = () => {
                 key={m.id}
                 onClick={() => setActiveModule(m.id)}
                 aria-current={isActive ? 'page' : undefined}
-                className={`flex flex-col items-center justify-center p-1.5 rounded-xl transition ${
+                className={`flex-1 min-w-0 min-h-[44px] flex flex-col items-center justify-center py-1 px-0.5 rounded-xl transition ${
                   isActive ? 'font-bold' : 'text-slate-400 hover:text-inherit'
                 }`}
                 style={isActive ? { color: preferences.accentColor || '#8b5cf6' } : undefined}
@@ -174,17 +174,17 @@ export const AppShell: React.FC = () => {
                   className={`w-5 h-5 transition-transform ${isActive ? 'scale-110' : ''}`} 
                   style={isActive ? { color: preferences.accentColor || '#8b5cf6' } : undefined}
                 />
-                <span className="text-[10px] tracking-tight mt-0.5">{localizedLabel}</span>
+                <span className="text-[10px] tracking-tight mt-0.5 truncate max-w-full">{localizedLabel}</span>
               </button>
             );
           })}
           <button
             onClick={() => setIsMobileNavOpen(true)}
             aria-label="Open full menu"
-            className="flex flex-col items-center justify-center p-1.5 rounded-xl text-slate-400 hover:text-inherit transition"
+            className="flex-1 min-w-0 min-h-[44px] flex flex-col items-center justify-center py-1 px-0.5 rounded-xl text-slate-400 hover:text-inherit transition"
           >
             <Menu className="w-5 h-5" />
-            <span className="text-[10px] tracking-tight mt-0.5">{t('nav.menu', preferences.language) || 'Menu'}</span>
+            <span className="text-[10px] tracking-tight mt-0.5 truncate max-w-full">{t('nav.menu', preferences.language) || 'Menu'}</span>
           </button>
         </nav>
       </div>

@@ -87,7 +87,7 @@ export const Sidebar: React.FC<SidebarProps> = ({ isMobileDrawer = false, onClos
       role="navigation"
       aria-label="Main Application Navigation"
       className={`h-full border-r ${activeTheme.borderClass} ${activeTheme.surfaceClass} flex flex-col justify-between transition-all duration-300 z-30 shrink-0 select-none ${
-        isMobileDrawer ? 'w-72 shadow-2xl' : isCompact ? 'w-[68px]' : 'w-64'
+        isMobileDrawer ? 'w-full max-w-[360px] shadow-2xl pt-safe pb-safe' : isCompact ? 'w-[68px]' : 'w-64'
       }`}
     >
       {/* Brand Header */}
