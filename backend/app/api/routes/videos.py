@@ -370,6 +370,87 @@ async def get_recommendations(
     videos = await video_service.get_recommended_videos(current_uid, category=category, limit=limit)
     return [build_video_response(v, current_uid) for v in videos]
 
+@router.get("/youtube")
+async def get_youtube_videos_proxy(
+    q: Optional[str] = Query(None, description="Search keyword"),
+    category: Optional[str] = Query(None, description="Category filter"),
+    max_results: int = Query(15, ge=1, le=50)
+):
+    """
+    Sovereign YouTube Proxy Endpoint:
+    Queries real YouTube Data API v3 when YOUTUBE_API_KEY is configured on the backend.
+    Never exposes API keys in mobile frontend.
+    Returns clear unconfigured status without fabricated trending videos.
+    """
+    from app.core.config import settings
+    import httpx
+
+    api_key = settings.YOUTUBE_API_KEY
+    if not api_key:
+        return {
+            "configured": False,
+            "query": q or "",
+            "category": category or "All",
+            "videos": [],
+            "message": "YouTube Data API key (YOUTUBE_API_KEY) not configured on the backend server. Real video search available via external handoff."
+        }
+
+    search_query = q or (f"{category} tech india" if category and category != "All" else "technology india")
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://www.googleapis.com/youtube/v3/search",
+                params={
+                    "part": "snippet",
+                    "q": search_query,
+                    "type": "video",
+                    "maxResults": max_results,
+                    "key": api_key,
+                }
+            )
+            if resp.status_code != 200:
+                err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                err_msg = err_data.get("error", {}).get("message", f"YouTube API error HTTP {resp.status_code}")
+                return {
+                    "configured": True,
+                    "query": search_query,
+                    "videos": [],
+                    "message": err_msg
+                }
+
+            data = resp.json()
+            items = []
+            for item in data.get("items", []):
+                snippet = item.get("snippet", {})
+                vid_id = item.get("id", {}).get("videoId")
+                if not vid_id:
+                    continue
+                thumbs = snippet.get("thumbnails", {})
+                thumb_url = thumbs.get("high", {}).get("url") or thumbs.get("medium", {}).get("url") or ""
+                items.append({
+                    "id": vid_id,
+                    "title": snippet.get("title", ""),
+                    "description": snippet.get("description", ""),
+                    "channelTitle": snippet.get("channelTitle", "YouTube Creator"),
+                    "channelId": snippet.get("channelId"),
+                    "publishedAt": snippet.get("publishedAt", ""),
+                    "thumbnailUrl": thumb_url,
+                    "category": category or "Tech"
+                })
+
+            return {
+                "configured": True,
+                "query": search_query,
+                "videos": items
+            }
+    except Exception as e:
+        return {
+            "configured": True,
+            "query": search_query,
+            "videos": [],
+            "message": f"Network error contacting YouTube Data API: {str(e)}"
+        }
+
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video_detail(
     video_id: str,
@@ -767,85 +848,4 @@ async def delete_video(video_id: str, current_user: dict = Depends(get_current_u
     await db.videos.delete_one({"_id": video_obj})
     await db.video_comments.delete_many({"video_id": video_id})
     return {"status": "deleted", "video_id": video_id}
-
-@router.get("/youtube")
-async def get_youtube_videos_proxy(
-    q: Optional[str] = Query(None, description="Search keyword"),
-    category: Optional[str] = Query(None, description="Category filter"),
-    max_results: int = Query(15, ge=1, le=50)
-):
-    """
-    Sovereign YouTube Proxy Endpoint:
-    Queries real YouTube Data API v3 when YOUTUBE_API_KEY is configured on the backend.
-    Never exposes API keys in mobile frontend.
-    Returns clear unconfigured status without fabricated trending videos.
-    """
-    from app.core.config import settings
-    import httpx
-
-    api_key = settings.YOUTUBE_API_KEY
-    if not api_key:
-        return {
-            "configured": False,
-            "query": q or "",
-            "category": category or "All",
-            "videos": [],
-            "message": "YouTube Data API key (YOUTUBE_API_KEY) not configured on the backend server. Real video search available via external handoff."
-        }
-
-    search_query = q or (f"{category} tech india" if category and category != "All" else "technology india")
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://www.googleapis.com/youtube/v3/search",
-                params={
-                    "part": "snippet",
-                    "q": search_query,
-                    "type": "video",
-                    "maxResults": max_results,
-                    "key": api_key,
-                }
-            )
-            if resp.status_code != 200:
-                err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                err_msg = err_data.get("error", {}).get("message", f"YouTube API error HTTP {resp.status_code}")
-                return {
-                    "configured": True,
-                    "query": search_query,
-                    "videos": [],
-                    "message": err_msg
-                }
-
-            data = resp.json()
-            items = []
-            for item in data.get("items", []):
-                snippet = item.get("snippet", {})
-                vid_id = item.get("id", {}).get("videoId")
-                if not vid_id:
-                    continue
-                thumbs = snippet.get("thumbnails", {})
-                thumb_url = thumbs.get("high", {}).get("url") or thumbs.get("medium", {}).get("url") or ""
-                items.append({
-                    "id": vid_id,
-                    "title": snippet.get("title", ""),
-                    "description": snippet.get("description", ""),
-                    "channelTitle": snippet.get("channelTitle", "YouTube Creator"),
-                    "channelId": snippet.get("channelId"),
-                    "publishedAt": snippet.get("publishedAt", ""),
-                    "thumbnailUrl": thumb_url,
-                    "category": category or "Tech"
-                })
-
-            return {
-                "configured": True,
-                "query": search_query,
-                "videos": items
-            }
-    except Exception as e:
-        return {
-            "configured": True,
-            "query": search_query,
-            "videos": [],
-            "message": f"Network error contacting YouTube Data API: {str(e)}"
-        }
 
