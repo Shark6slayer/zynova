@@ -1,5 +1,5 @@
 from fastapi import APIRouter
-from app.api.routes import health, auth, users, preferences, conversations, notifications, chat, social, search, videos, food, shopping, payments, ledger, devices, ai
+from app.api.routes import health, auth, users, preferences, conversations, notifications, chat, social, search, videos, food, shopping, payments, ledger, devices, ai, delivery
 from app.api.routes import platform  # Phase 24.1: Unified Identity, Media & Blocking
 
 api_router = APIRouter(prefix="/api/v1")
@@ -20,5 +20,6 @@ api_router.include_router(payments.router)
 api_router.include_router(ledger.router)
 api_router.include_router(devices.router)
 api_router.include_router(ai.router)
+api_router.include_router(delivery.router)
 api_router.include_router(platform.router)  # Phase 24.1: /platform/*
 
