@@ -234,6 +234,7 @@ async def create_story(
 
     res = await db.social_stories.insert_one(story_doc)
     story_doc["id"] = str(res.inserted_id)
+    story_doc["_id"] = str(res.inserted_id)
 
     # Broadcast real-time story indicator to followers
     follows_cursor = db.follows.find({"following_id": author["id"]})

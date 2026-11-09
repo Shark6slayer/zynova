@@ -384,3 +384,98 @@ async def clear_all_search_history(
         raise HTTPException(status_code=503, detail="Database unavailable")
     res = await db.search_history.delete_many({"user_id": current_user["id"]})
     return {"status": "cleared", "deleted_count": res.deleted_count}
+
+@router.get("/google")
+async def search_google_proxy(
+    q: str = Query(..., min_length=1, max_length=150, description="Google search keyword"),
+    start: int = Query(1, ge=1, le=91, description="Pagination start index"),
+    num: int = Query(10, ge=1, le=10, description="Number of results (max 10)")
+):
+    """
+    Sovereign Google Web Search Proxy:
+    Proxies requests securely through backend so Google API keys are never exposed in mobile apps.
+    Guarantees zero web-scraping, zero simulated results, and transparent status when unconfigured.
+    """
+    from app.core.config import settings
+    import httpx
+
+    cleaned_q = q.strip()
+    api_key = settings.GOOGLE_SEARCH_API_KEY
+    cx = settings.GOOGLE_SEARCH_CX
+
+    if not api_key or not cx:
+        return {
+            "configured": False,
+            "query": cleaned_q,
+            "total_results": 0,
+            "start": start,
+            "items": [],
+            "message": "Google Custom Search API credentials (GOOGLE_SEARCH_API_KEY, GOOGLE_SEARCH_CX) not configured on the backend server. Use external Google Web search.",
+            "fallback_url": f"https://www.google.com/search?q={cleaned_q}"
+        }
+
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(
+                "https://www.googleapis.com/customsearch/v1",
+                params={
+                    "key": api_key,
+                    "cx": cx,
+                    "q": cleaned_q,
+                    "start": start,
+                    "num": num,
+                }
+            )
+            if resp.status_code != 200:
+                err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
+                err_msg = err_data.get("error", {}).get("message", f"Google API error HTTP {resp.status_code}")
+                return {
+                    "configured": True,
+                    "query": cleaned_q,
+                    "total_results": 0,
+                    "start": start,
+                    "items": [],
+                    "message": err_msg,
+                    "fallback_url": f"https://www.google.com/search?q={cleaned_q}"
+                }
+            
+            data = resp.json()
+            raw_items = data.get("items", [])
+            items = []
+            for item in raw_items:
+                pagemap = item.get("pagemap", {})
+                thumb = None
+                if "cse_image" in pagemap and pagemap["cse_image"]:
+                    thumb = pagemap["cse_image"][0].get("src")
+                elif "cse_thumbnail" in pagemap and pagemap["cse_thumbnail"]:
+                    thumb = pagemap["cse_thumbnail"][0].get("src")
+
+                items.append({
+                    "title": item.get("title", ""),
+                    "link": item.get("link", ""),
+                    "snippet": item.get("snippet", ""),
+                    "displayLink": item.get("displayLink", ""),
+                    "thumbnailUrl": thumb
+                })
+
+            total = int(data.get("searchInformation", {}).get("totalResults", "0"))
+            return {
+                "configured": True,
+                "query": cleaned_q,
+                "total_results": total,
+                "start": start,
+                "items": items,
+                "has_more": (start + num) <= total,
+                "fallback_url": f"https://www.google.com/search?q={cleaned_q}"
+            }
+    except Exception as e:
+        return {
+            "configured": True,
+            "query": cleaned_q,
+            "total_results": 0,
+            "start": start,
+            "items": [],
+            "message": f"Network error contacting Google API: {str(e)}",
+            "fallback_url": f"https://www.google.com/search?q={cleaned_q}"
+        }
+

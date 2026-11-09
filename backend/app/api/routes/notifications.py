@@ -239,3 +239,36 @@ async def update_notification_preferences(
         upsert=True
     )
     return payload
+
+# 8. Register Mobile Push Token (Expo / FCM)
+from pydantic import BaseModel, Field
+
+class PushTokenPayload(BaseModel):
+    push_token: str = Field(..., min_length=5, max_length=500)
+    device_platform: Optional[str] = Field("android", max_length=50)
+
+@router.post("/push-token", status_code=status.HTTP_200_OK)
+async def register_push_token(
+    payload: PushTokenPayload,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=503, detail="Database unavailable")
+
+    now = datetime.now(timezone.utc)
+    token_entry = {
+        "user_id": current_user["id"],
+        "token": payload.push_token,
+        "platform": payload.device_platform,
+        "updated_at": now
+    }
+
+    # Upsert token into user_push_tokens
+    await db.user_push_tokens.update_one(
+        {"user_id": current_user["id"], "token": payload.push_token},
+        {"$set": token_entry},
+        upsert=True
+    )
+
+    return {"status": "registered", "token": payload.push_token}

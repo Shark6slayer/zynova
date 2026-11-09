@@ -78,8 +78,8 @@ async def search_users(
     async for u in cursor:
         results.append(UserPublicSummary(
             id=str(u["_id"]),
-            username=u["username"],
-            full_name=u["full_name"],
+            username=u.get("username", ""),
+            full_name=u.get("full_name") or u.get("username", ""),
             avatar_url=u.get("avatar_url")
         ))
     return results

@@ -44,7 +44,8 @@ async def get_or_create_direct_chat(current_user: dict, recipient_id: str) -> di
     if recipient_uid in blocked:
         raise PermissionError("Cannot message a blocked user")
 
-    recip_user = await db.users.find_one({"_id": ObjectId(recipient_uid)})
+    user_query = {"$or": [{"_id": ObjectId(recipient_uid)}, {"_id": recipient_uid}]} if ObjectId.is_valid(recipient_uid) else {"_id": recipient_uid}
+    recip_user = await db.users.find_one(user_query)
     if not recip_user:
         raise LookupError("Recipient user not found")
 
@@ -61,13 +62,13 @@ async def get_or_create_direct_chat(current_user: dict, recipient_id: str) -> di
         current_uid: {
             "id": current_uid,
             "username": current_user["username"],
-            "full_name": current_user["full_name"],
+            "full_name": current_user.get("full_name") or current_user.get("username", ""),
             "avatar_url": current_user.get("avatar_url")
         },
         recipient_uid: {
             "id": recipient_uid,
-            "username": recip_user["username"],
-            "full_name": recip_user["full_name"],
+            "username": recip_user.get("username", ""),
+            "full_name": recip_user.get("full_name") or recip_user.get("username", ""),
             "avatar_url": recip_user.get("avatar_url")
         }
     }
