@@ -75,8 +75,11 @@ async def send_phone_otp(
 
     # Check cooldown (60 seconds)
     existing_otp = await db.phone_otps.find_one({"user_id": current_user["id"], "phone": phone})
-    if existing_otp:
-        elapsed = (now - existing_otp["created_at"]).total_seconds()
+    if existing_otp and "created_at" in existing_otp:
+        created_at = existing_otp["created_at"]
+        if hasattr(created_at, "replace") and created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        elapsed = (now - created_at).total_seconds()
         if elapsed < 60:
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
@@ -130,7 +133,11 @@ async def verify_phone_otp(
     if not record:
         raise HTTPException(status_code=400, detail="No pending verification found for this phone number")
 
-    if now > record["expires_at"]:
+    expires_at = record["expires_at"]
+    if hasattr(expires_at, "replace") and expires_at.tzinfo is None:
+        expires_at = expires_at.replace(tzinfo=timezone.utc)
+
+    if now > expires_at:
         await db.phone_otps.delete_one({"_id": record["_id"]})
         raise HTTPException(status_code=400, detail="OTP has expired. Please request a new one.")
 
@@ -294,3 +301,4 @@ async def get_delivery_job(job_id: str, current_user: dict = Depends(get_current
         job["updated_at"] = job["updated_at"].isoformat()
 
     return job
+
