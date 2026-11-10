@@ -124,6 +124,20 @@ class StorageAdapter(abc.ABC):
     ) -> str:
         """Generates a presigned download URL for a private file."""
 
+    @abc.abstractmethod
+    async def get_object_metadata(self, storage_key: str) -> Optional[Dict[str, Any]]:
+        """Returns {'file_size': int, 'content_type': Optional[str]} or None if object is missing."""
+
+    @abc.abstractmethod
+    def stream_range(
+        self,
+        storage_key: str,
+        start: int,
+        end: int,
+        chunk_size: int = 1024 * 1024,
+    ):
+        """Returns an async iterator yielding byte chunks for [start, end] inclusive."""
+
     @property
     @abc.abstractmethod
     def adapter_name(self) -> str:
@@ -199,6 +213,52 @@ class LocalDevStorageAdapter(StorageAdapter):
     ) -> str:
         return f"/storage/media/{storage_key}"
 
+    def _resolve_local_path(self, storage_key: str) -> Optional[str]:
+        safe_key = storage_key.lstrip("/\\")
+        candidate = os.path.abspath(os.path.join(LOCAL_MEDIA_DIR, safe_key.replace("/", os.sep)))
+        if candidate.startswith(LOCAL_MEDIA_DIR) and os.path.exists(candidate):
+            return candidate
+        legacy_videos_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "..", "storage", "videos")
+        )
+        legacy_candidate = os.path.abspath(os.path.join(legacy_videos_dir, safe_key.replace("/", os.sep)))
+        if legacy_candidate.startswith(legacy_videos_dir) and os.path.exists(legacy_candidate):
+            return legacy_candidate
+        # Also support pre-existing app-level storage/videos directory
+        app_videos_dir = os.path.abspath(
+            os.path.join(os.path.dirname(__file__), "..", "storage", "videos")
+        )
+        app_candidate = os.path.abspath(os.path.join(app_videos_dir, safe_key.replace("/", os.sep)))
+        if app_candidate.startswith(app_videos_dir) and os.path.exists(app_candidate):
+            return app_candidate
+        return None
+
+    async def get_object_metadata(self, storage_key: str) -> Optional[Dict[str, Any]]:
+        path = self._resolve_local_path(storage_key)
+        if not path:
+            return None
+        return {"file_size": os.path.getsize(path), "content_type": None}
+
+    async def stream_range(
+        self,
+        storage_key: str,
+        start: int,
+        end: int,
+        chunk_size: int = CHUNK_SIZE,
+    ):
+        path = self._resolve_local_path(storage_key)
+        if not path:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video stream object not found")
+        bytes_remaining = (end - start) + 1
+        async with aiofiles.open(path, mode="rb") as f:
+            await f.seek(start)
+            while bytes_remaining > 0:
+                chunk = await f.read(min(chunk_size, bytes_remaining))
+                if not chunk:
+                    break
+                bytes_remaining -= len(chunk)
+                yield chunk
+
 
 # ---------------------------------------------------------------------------
 # S3-compatible adapter (Cloudflare R2 / AWS S3)
@@ -246,14 +306,17 @@ class S3StorageAdapter(StorageAdapter):
         is_public: bool = True,
     ) -> str:
         session = await self._get_client()
-        extra = {"ContentType": content_type}
-        if is_public:
+        extra: Dict[str, Any] = {"ContentType": content_type}
+        is_r2 = bool(self._endpoint_url and "r2.cloudflarestorage.com" in self._endpoint_url.lower())
+        if is_public and not is_r2:
             extra["ACL"] = "public-read"
         async with session.client("s3", endpoint_url=self._endpoint_url) as s3:
             with open(file_path, "rb") as fh:
                 await s3.upload_fileobj(fh, self._bucket, destination_key, ExtraArgs=extra)
         if self._cdn_base:
             return f"{self._cdn_base.rstrip('/')}/{destination_key}"
+        if self._endpoint_url:
+            return f"{self._endpoint_url.rstrip('/')}/{self._bucket}/{destination_key}"
         return f"https://{self._bucket}.s3.amazonaws.com/{destination_key}"
 
     async def delete_file(self, storage_key: str) -> None:
@@ -301,18 +364,65 @@ class S3StorageAdapter(StorageAdapter):
         expires_in: int = 300,
     ) -> str:
         import boto3  # type: ignore
+        from botocore.config import Config  # type: ignore
+        safe_ttl = max(30, min(900, int(expires_in)))
         client = boto3.client(
             "s3",
             endpoint_url=self._endpoint_url,
             aws_access_key_id=getattr(settings, "MEDIA_S3_ACCESS_KEY_ID", None),
             aws_secret_access_key=getattr(settings, "MEDIA_S3_SECRET_ACCESS_KEY", None),
             region_name=getattr(settings, "MEDIA_S3_REGION", "auto"),
+            config=Config(signature_version="s3v4"),
         )
         return client.generate_presigned_url(
             "get_object",
             Params={"Bucket": self._bucket, "Key": storage_key},
-            ExpiresIn=expires_in,
+            ExpiresIn=safe_ttl,
         )
+
+    async def get_object_metadata(self, storage_key: str) -> Optional[Dict[str, Any]]:
+        session = await self._get_client()
+        try:
+            async with session.client("s3", endpoint_url=self._endpoint_url) as s3:
+                head = await s3.head_object(Bucket=self._bucket, Key=storage_key)
+                return {
+                    "file_size": int(head.get("ContentLength", 0)),
+                    "content_type": head.get("ContentType"),
+                }
+        except Exception as exc:
+            err_code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
+            if err_code in ("404", "NoSuchKey", "NotFound"):
+                return None
+            logger.warning(f"[R2] head_object error for key {storage_key}: {type(exc).__name__}")
+            return None
+
+    async def stream_range(
+        self,
+        storage_key: str,
+        start: int,
+        end: int,
+        chunk_size: int = CHUNK_SIZE,
+    ):
+        session = await self._get_client()
+        try:
+            async with session.client("s3", endpoint_url=self._endpoint_url) as s3:
+                resp = await s3.get_object(
+                    Bucket=self._bucket,
+                    Key=storage_key,
+                    Range=f"bytes={start}-{end}",
+                )
+                body = resp["Body"]
+                async for chunk in body.iter_chunks(chunk_size=chunk_size):
+                    if chunk:
+                        yield chunk
+        except Exception as exc:
+            err_code = str(getattr(exc, "response", {}).get("Error", {}).get("Code", ""))
+            if err_code in ("404", "NoSuchKey", "NotFound"):
+                raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video stream object not found")
+            if err_code in ("AccessDenied", "ExpiredToken", "InvalidAccessKeyId"):
+                raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Object storage authorization failed")
+            logger.error(f"[R2] stream_range failure: {type(exc).__name__}")
+            raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Object storage stream error")
 
 
 # ---------------------------------------------------------------------------

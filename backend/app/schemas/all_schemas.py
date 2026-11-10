@@ -648,6 +648,96 @@ class CreatorAnalyticsResponse(BaseModel):
     total_comments: int
     top_videos: List[Dict[str, Any]]
 
+# Phase 12.2: Zenova Play Extension Schemas (Playlists, Saved Videos, YouTube Enrichment, R2 Stream URL)
+class PlaylistDetailResponse(PlaylistResponse):
+    videos: List[VideoResponse] = []
+
+class YouTubeSavedMetadata(BaseModel):
+    title: str = Field(..., min_length=1, max_length=300)
+    thumbnail_url: Optional[str] = Field(None, max_length=1000)
+    channel_title: Optional[str] = Field(None, max_length=200)
+    channel_id: Optional[str] = Field(None, max_length=100)
+    published_at: Optional[str] = Field(None, max_length=100)
+    duration: Optional[str] = Field(None, max_length=32)
+    category: Optional[str] = Field(None, max_length=64)
+
+class SaveVideoPayload(BaseModel):
+    video_id: str = Field(..., min_length=1, max_length=64)
+    source: str = Field("zenova", pattern="^(zenova|youtube)$")
+    title: Optional[str] = Field(None, max_length=300)
+    thumbnail_url: Optional[str] = Field(None, max_length=1000)
+    channel_title: Optional[str] = Field(None, max_length=200)
+    channel_id: Optional[str] = Field(None, max_length=100)
+    published_at: Optional[str] = Field(None, max_length=100)
+    duration: Optional[str] = Field(None, max_length=32)
+    category: Optional[str] = Field(None, max_length=64)
+
+class SavedVideoEntryResponse(BaseModel):
+    id: str
+    user_id: str
+    source: str
+    video_id: str
+    saved_at: datetime
+    video: Optional[VideoResponse] = None
+    youtube_metadata: Optional[YouTubeSavedMetadata] = None
+
+class YouTubeVideoItem(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    channelTitle: str
+    channelId: Optional[str] = None
+    publishedAt: str = ""
+    thumbnailUrl: str = ""
+    category: str = "General"
+    categoryId: Optional[str] = None
+    duration: Optional[str] = None
+    durationSeconds: Optional[int] = None
+    viewCount: Optional[int] = None
+
+class YouTubeSearchResponse(BaseModel):
+    configured: bool
+    query: str = ""
+    category: Optional[str] = None
+    videos: List[YouTubeVideoItem] = []
+    next_page_token: Optional[str] = None
+    prev_page_token: Optional[str] = None
+    has_more: bool = False
+    total_results: Optional[int] = None
+    cached: bool = False
+    quota_exceeded: bool = False
+    message: Optional[str] = None
+
+class YouTubeCategoryItem(BaseModel):
+    id: str
+    title: str
+    assignable: bool = True
+
+class YouTubeCategoriesResponse(BaseModel):
+    configured: bool
+    region_code: str = "IN"
+    categories: List[YouTubeCategoryItem] = []
+    cached: bool = False
+    quota_exceeded: bool = False
+    message: Optional[str] = None
+
+class YouTubeVideoStatusResponse(BaseModel):
+    exists: bool
+    embeddable: bool
+    privacyStatus: Optional[str] = None
+    title: Optional[str] = None
+    channelTitle: Optional[str] = None
+    duration: Optional[str] = None
+    viewCount: Optional[int] = None
+    message: Optional[str] = None
+
+class VideoStreamUrlResponse(BaseModel):
+    video_id: str
+    stream_url: str
+    delivery: str  # "presigned_r2" | "backend_stream"
+    expires_in: int
+    mime_type: str
+
 # Food Discovery and Ordering Schemas
 class MenuItemResponse(BaseModel):
     id: str

@@ -48,6 +48,36 @@ async def setup_phase24_indexes(db) -> None:
             name="reports_unique_per_reporter_target",
         )
 
-        logger.info("Phase 24.1 supplemental indexes verified.")
+        # Phase 12.2: Video feed, playlists, saved videos & watch history indexes
+        await db.videos.create_index(
+            [("visibility", 1), ("status", 1), ("moderation_status", 1), ("is_deleted", 1), ("category", 1), ("created_at", -1)],
+            name="videos_feed_discovery_idx",
+        )
+        await db.videos.create_index(
+            [("is_short", 1), ("visibility", 1), ("status", 1), ("created_at", -1)],
+            name="videos_shorts_feed_idx",
+        )
+        await db.videos.create_index([("channel_id", 1), ("created_at", -1)], name="videos_channel_idx")
+
+        await db.video_playlists.create_index([("owner_id", 1), ("updated_at", -1)], name="video_playlists_owner_idx")
+
+        await db.video_saves.create_index(
+            [("user_id", 1), ("source", 1), ("video_id", 1)],
+            unique=True,
+            name="video_saves_unique_user_item",
+        )
+        await db.video_saves.create_index([("user_id", 1), ("saved_at", -1)], name="video_saves_user_recent_idx")
+
+        await db.video_watch_history.create_index(
+            [("user_id", 1), ("video_id", 1)],
+            unique=True,
+            name="video_watch_history_unique_user_video",
+        )
+        await db.video_watch_history.create_index(
+            [("user_id", 1), ("last_watched_at", -1)],
+            name="video_watch_history_user_recent_idx",
+        )
+
+        logger.info("Phase 24.1 & Phase 12.2 supplemental indexes verified.")
     except Exception as exc:
         logger.error(f"Phase 24.1 index setup error: {exc}")

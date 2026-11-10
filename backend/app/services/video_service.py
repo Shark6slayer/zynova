@@ -259,15 +259,30 @@ async def add_video_comment(current_user: dict, video_id: str, content: str, par
 
 async def record_watch_progress(current_user: dict, video_id: str, position_seconds: float, duration_seconds: float, completed: bool = False) -> dict:
     db = get_database()
+    try:
+        video_obj = ObjectId(video_id)
+    except Exception:
+        raise ValueError("Invalid video ID")
+
+    video = await db.videos.find_one({"_id": video_obj})
+    if not video or video.get("is_deleted"):
+        raise LookupError("Video not found")
+
     current_uid = current_user["id"]
+    if video.get("visibility") == "private" and video.get("owner_id") != current_uid:
+        raise PermissionError("Cannot record progress on private video")
+
+    safe_duration = max(0.0, float(duration_seconds))
+    safe_position = max(0.0, min(float(position_seconds), safe_duration)) if safe_duration > 0 else max(0.0, float(position_seconds))
+    is_completed = bool(completed or (safe_duration > 0 and safe_position / safe_duration >= 0.9))
     now = datetime.now(timezone.utc)
 
     progress_doc = {
         "user_id": current_uid,
         "video_id": video_id,
-        "playback_position_seconds": position_seconds,
-        "duration_seconds": duration_seconds,
-        "completed": completed,
+        "playback_position_seconds": safe_position,
+        "duration_seconds": safe_duration,
+        "completed": is_completed,
         "last_watched_at": now
     }
 
@@ -277,20 +292,36 @@ async def record_watch_progress(current_user: dict, video_id: str, position_seco
         upsert=True
     )
 
-    # Increment view counter once per viewing session
-    await db.videos.update_one({"_id": ObjectId(video_id)}, {"$inc": {"view_count": 1}})
+    return {
+        "status": "recorded",
+        "video_id": video_id,
+        "position": safe_position,
+        "completed": is_completed
+    }
 
-    return {"status": "recorded", "video_id": video_id, "position": position_seconds}
-
-async def get_user_watch_history(current_user: dict, limit: int = 50) -> List[dict]:
+async def get_user_watch_history(current_user: dict, limit: int = 50, offset: int = 0) -> List[dict]:
     db = get_database()
     current_uid = current_user["id"]
-    cursor = db.video_watch_history.find({"user_id": current_uid}).sort("last_watched_at", -1).limit(limit)
+    cursor = (
+        db.video_watch_history.find({"user_id": current_uid})
+        .sort("last_watched_at", -1)
+        .skip(offset)
+        .limit(limit)
+    )
 
     history = []
     async for entry in cursor:
-        video = await db.videos.find_one({"_id": ObjectId(entry["video_id"])})
-        if video and video.get("visibility") == "public":
+        try:
+            vid_obj = ObjectId(entry["video_id"])
+        except Exception:
+            continue
+        video = await db.videos.find_one({"_id": vid_obj})
+        if (
+            video
+            and not video.get("is_deleted")
+            and video.get("moderation_status") not in ("removed", "rejected", "hidden")
+            and (video.get("visibility") == "public" or video.get("owner_id") == current_uid)
+        ):
             history.append({
                 "video": video,
                 "playback_position_seconds": entry.get("playback_position_seconds", 0),
@@ -299,6 +330,131 @@ async def get_user_watch_history(current_user: dict, limit: int = 50) -> List[di
             })
     return history
 
+async def delete_watch_history_entry(current_user: dict, video_id: str) -> dict:
+    db = get_database()
+    res = await db.video_watch_history.delete_one({
+        "user_id": current_user["id"],
+        "video_id": video_id
+    })
+    if res.deleted_count == 0:
+        raise LookupError("Watch history entry not found")
+    return {"deleted": True, "video_id": video_id}
+
+async def clear_watch_history(current_user: dict) -> dict:
+    db = get_database()
+    res = await db.video_watch_history.delete_many({"user_id": current_user["id"]})
+    return {"deleted": True, "deleted_count": res.deleted_count}
+
+# -------------------------------------------------------------
+# 4B. Saved Videos (Zenova & YouTube References)
+# -------------------------------------------------------------
+
+async def get_saved_video_ids(user_id: Optional[str]) -> set:
+    if not user_id:
+        return set()
+    db = get_database()
+    if db is None:
+        return set()
+    cursor = db.video_saves.find({"user_id": user_id, "source": "zenova"}, {"video_id": 1})
+    return {doc["video_id"] async for doc in cursor}
+
+async def save_video_for_user(current_user: dict, payload: Any) -> dict:
+    import re
+    db = get_database()
+    current_uid = current_user["id"]
+    source = payload.source
+    video_id = payload.video_id.strip()
+
+    yt_meta = None
+    video_doc = None
+    if source == "zenova":
+        try:
+            vid_obj = ObjectId(video_id)
+        except Exception:
+            raise ValueError("Invalid Zenova video ID")
+        video_doc = await db.videos.find_one({"_id": vid_obj})
+        if not video_doc or video_doc.get("is_deleted"):
+            raise LookupError("Video not found")
+        if video_doc.get("visibility") == "private" and video_doc.get("owner_id") != current_uid:
+            raise PermissionError("Cannot save a private video owned by another user")
+    else:
+        if not re.match(r"^[A-Za-z0-9_-]{11}$", video_id):
+            raise ValueError("Invalid YouTube video ID")
+        yt_meta = {
+            "title": sanitize_text(payload.title or "YouTube Video"),
+            "thumbnail_url": payload.thumbnail_url,
+            "channel_title": sanitize_text(payload.channel_title) if payload.channel_title else None,
+            "channel_id": payload.channel_id,
+            "published_at": payload.published_at,
+            "duration": payload.duration,
+            "category": payload.category or "YouTube",
+        }
+
+    now = datetime.now(timezone.utc)
+    existing = await db.video_saves.find_one({
+        "user_id": current_uid,
+        "source": source,
+        "video_id": video_id,
+    })
+    if existing:
+        if yt_meta:
+            await db.video_saves.update_one(
+                {"_id": existing["_id"]},
+                {"$set": {"youtube_metadata": yt_meta}}
+            )
+            existing["youtube_metadata"] = yt_meta
+        return {"entry": existing, "video": video_doc, "already_saved": True}
+
+    doc = {
+        "user_id": current_uid,
+        "source": source,
+        "video_id": video_id,
+        "youtube_metadata": yt_meta,
+        "saved_at": now,
+    }
+    res = await db.video_saves.insert_one(doc)
+    doc["_id"] = res.inserted_id
+    return {"entry": doc, "video": video_doc, "already_saved": False}
+
+async def unsave_video_for_user(current_user: dict, video_id: str, source: Optional[str] = None) -> dict:
+    db = get_database()
+    query: Dict[str, Any] = {"user_id": current_user["id"], "video_id": video_id.strip()}
+    if source in ("zenova", "youtube"):
+        query["source"] = source
+    res = await db.video_saves.delete_one(query)
+    if res.deleted_count == 0:
+        raise LookupError("Saved video not found")
+    return {"deleted": True, "video_id": video_id}
+
+async def list_saved_videos(current_user: dict, limit: int = 20, offset: int = 0) -> List[dict]:
+    db = get_database()
+    current_uid = current_user["id"]
+    cursor = (
+        db.video_saves.find({"user_id": current_uid})
+        .sort("saved_at", -1)
+        .skip(offset)
+        .limit(limit)
+    )
+    items = []
+    async for entry in cursor:
+        vid = None
+        if entry.get("source") == "zenova":
+            try:
+                v = await db.videos.find_one({"_id": ObjectId(entry["video_id"])})
+                if (
+                    v
+                    and not v.get("is_deleted")
+                    and v.get("moderation_status") not in ("removed", "rejected", "hidden")
+                    and (v.get("visibility") == "public" or v.get("owner_id") == current_uid)
+                ):
+                    vid = v
+                else:
+                    continue
+            except Exception:
+                continue
+        items.append({"entry": entry, "video": vid})
+    return items
+
 # -------------------------------------------------------------
 # 5. Playlists
 # -------------------------------------------------------------
@@ -306,7 +462,7 @@ async def get_user_watch_history(current_user: dict, limit: int = 50) -> List[di
 async def create_playlist(current_user: dict, title: str, description: Optional[str], visibility: str, video_ids: Optional[List[str]] = None) -> dict:
     db = get_database()
     now = datetime.now(timezone.utc)
-    clean_vids = video_ids or []
+    clean_vids = list(dict.fromkeys([str(v) for v in (video_ids or []) if ObjectId.is_valid(str(v))]))
 
     playlist_doc = {
         "owner_id": current_user["id"],
@@ -324,43 +480,155 @@ async def create_playlist(current_user: dict, title: str, description: Optional[
     playlist_doc["_id"] = res.inserted_id
     return playlist_doc
 
+async def list_user_playlists(current_user: dict, limit: int = 20, offset: int = 0) -> List[dict]:
+    db = get_database()
+    cursor = (
+        db.video_playlists.find({"owner_id": current_user["id"]})
+        .sort("updated_at", -1)
+        .skip(offset)
+        .limit(limit)
+    )
+    return [doc async for doc in cursor]
+
+async def get_playlist_detail(playlist_id: str, current_user: Optional[dict] = None) -> dict:
+    db = get_database()
+    try:
+        pl_obj = ObjectId(playlist_id)
+    except Exception:
+        raise ValueError("Invalid playlist ID")
+
+    playlist = await db.video_playlists.find_one({"_id": pl_obj})
+    if not playlist:
+        raise LookupError("Playlist not found")
+
+    current_uid = current_user["id"] if current_user else None
+    if playlist.get("visibility") == "private" and playlist.get("owner_id") != current_uid:
+        raise PermissionError("Private playlist access denied")
+
+    resolved_videos = []
+    for vid in playlist.get("video_ids", []):
+        if not ObjectId.is_valid(vid):
+            continue
+        v = await db.videos.find_one({"_id": ObjectId(vid)})
+        if (
+            v
+            and not v.get("is_deleted")
+            and v.get("moderation_status") not in ("removed", "rejected", "hidden")
+            and (v.get("visibility") == "public" or v.get("owner_id") == current_uid)
+        ):
+            resolved_videos.append(v)
+
+    return {"playlist": playlist, "videos": resolved_videos}
+
+async def delete_playlist(current_user: dict, playlist_id: str) -> dict:
+    db = get_database()
+    try:
+        pl_obj = ObjectId(playlist_id)
+    except Exception:
+        raise ValueError("Invalid playlist ID")
+
+    playlist = await db.video_playlists.find_one({"_id": pl_obj})
+    if not playlist:
+        raise LookupError("Playlist not found")
+    if playlist.get("owner_id") != current_user["id"]:
+        raise PermissionError("Not authorized to delete another user's playlist")
+
+    await db.video_playlists.delete_one({"_id": pl_obj})
+    return {"deleted": True, "playlist_id": playlist_id}
+
 async def add_or_remove_playlist_video(current_user: dict, playlist_id: str, video_id: str, action: str = "add") -> dict:
     db = get_database()
-    playlist = await db.video_playlists.find_one({"_id": ObjectId(playlist_id)})
-    if not playlist or playlist.get("owner_id") != current_user["id"]:
-        raise LookupError("Playlist not found or unauthorized")
+    try:
+        pl_obj = ObjectId(playlist_id)
+        ObjectId(video_id)
+    except Exception:
+        raise ValueError("Invalid playlist ID or video ID")
+
+    playlist = await db.video_playlists.find_one({"_id": pl_obj})
+    if not playlist:
+        raise LookupError("Playlist not found")
+    if playlist.get("owner_id") != current_user["id"]:
+        raise PermissionError("Not authorized to modify another user's playlist")
+
+    if action == "add":
+        video = await db.videos.find_one({"_id": ObjectId(video_id)})
+        if not video or video.get("is_deleted"):
+            raise LookupError("Video not found")
+        if video.get("visibility") == "private" and video.get("owner_id") != current_user["id"]:
+            raise PermissionError("Cannot add another user's private video to a playlist")
 
     now = datetime.now(timezone.utc)
     if action == "add":
         await db.video_playlists.update_one(
-            {"_id": ObjectId(playlist_id)},
+            {"_id": pl_obj},
             {"$addToSet": {"video_ids": video_id}, "$set": {"updated_at": now}}
         )
     else:
         await db.video_playlists.update_one(
-            {"_id": ObjectId(playlist_id)},
+            {"_id": pl_obj},
             {"$pull": {"video_ids": video_id}, "$set": {"updated_at": now}}
         )
 
-    updated = await db.video_playlists.find_one({"_id": ObjectId(playlist_id)})
+    updated = await db.video_playlists.find_one({"_id": pl_obj})
     count = len(updated.get("video_ids", []))
-    await db.video_playlists.update_one({"_id": ObjectId(playlist_id)}, {"$set": {"videos_count": count}})
+    await db.video_playlists.update_one({"_id": pl_obj}, {"$set": {"videos_count": count}})
 
     return {"status": "ok", "playlist_id": playlist_id, "action": action, "videos_count": count}
 
 # -------------------------------------------------------------
-# 6. Recommendation Engine (Deterministic & Explainable)
+# 6. Feed & Recommendation Engine (Deterministic & Explainable)
 # -------------------------------------------------------------
 
-async def get_recommended_videos(current_user_id: Optional[str] = None, category: Optional[str] = None, limit: int = 30) -> List[dict]:
+async def get_feed_videos(
+    current_user_id: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 20,
+    offset: int = 0,
+    is_short: Optional[bool] = None,
+) -> List[dict]:
+    db = get_database()
+    if db is None:
+        return []
+    query: Dict[str, Any] = {
+        "visibility": "public",
+        "status": "published",
+        "is_deleted": {"$ne": True},
+        "moderation_status": {"$nin": ["removed", "rejected", "hidden"]},
+    }
+    if category and category != "All":
+        query["category"] = category
+    if is_short is not None:
+        query["is_short"] = is_short
+
+    if current_user_id:
+        blocked = await get_blocked_users(db, current_user_id)
+        if blocked:
+            query["owner_id"] = {"$nin": blocked}
+
+    cursor = db.videos.find(query).sort("created_at", -1).skip(offset).limit(limit)
+    return [v async for v in cursor]
+
+async def get_recommended_videos(
+    current_user_id: Optional[str] = None,
+    category: Optional[str] = None,
+    limit: int = 30,
+    offset: int = 0,
+) -> List[dict]:
     """
     Explainable Ranking Formula:
     Score = (likes * 2 + comments * 3 + views * 0.5 + is_subscribed_boost) / (age_hours + 2)^1.3
-    Filtered strictly against blocked creators and private/unlisted videos.
+    Filtered strictly against blocked creators, private/unlisted, deleted, and moderated videos.
     """
     db = get_database()
+    if db is None:
+        return []
     now = datetime.now(timezone.utc)
-    query: Dict[str, Any] = {"visibility": "public", "status": "published"}
+    query: Dict[str, Any] = {
+        "visibility": "public",
+        "status": "published",
+        "is_deleted": {"$ne": True},
+        "moderation_status": {"$nin": ["removed", "rejected", "hidden"]},
+    }
 
     if category and category != "All":
         query["category"] = category
@@ -397,7 +665,7 @@ async def get_recommended_videos(current_user_id: Optional[str] = None, category
         return score
 
     candidates.sort(key=calculate_score, reverse=True)
-    return candidates[:limit]
+    return candidates[offset : offset + limit]
 
 # -------------------------------------------------------------
 # 7. Creator Analytics

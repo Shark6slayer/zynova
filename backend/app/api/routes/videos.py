@@ -1,24 +1,23 @@
 """
-Zynova Video API Routes (Phase 27 Extended).
+Zynova Video API Routes (Phase 27 Extended + Phase 12.2 Gap Closure).
 Exposes endpoints for:
-- Creator channels (create, update, get by handle, subscriber counts).
-- Video & Shorts upload, streaming, update, and deletion.
-- Shorts continuous swipe-feed (`/videos/shorts`).
-- Channel subscriptions (`/videos/channels/{id}/subscribe`).
-- Video engagement (likes, dislikes, threaded comments, pinning).
-- Watch progress and watch history (`/videos/history`).
-- Playlists (`/videos/playlists`).
-- Explainable recommendation feed (`/videos/recommendations`).
-- Creator analytics (`/videos/channels/{id}/analytics`).
+- Creator channels (create, update, get by handle, subscriber counts, analytics).
+- Sovereign YouTube Data API v3 proxy with `pageToken` cursor pagination, batch `videos.list` enrichment & `videoCategories.list`.
+- Saved videos (`GET/POST/DELETE /videos/saved`) supporting Zenova & permitted YouTube metadata references.
+- Playlists (`GET/POST /videos/playlists`, `GET/DELETE /videos/playlists/{id}`, add/remove items).
+- Watch progress & history retrieval/deletion (`/videos/user/history`).
+- Video & Shorts upload, R2/local Range streaming, signed stream URL, update, and deletion.
+- Shorts continuous swipe-feed (`/videos/shorts`) & paginated discovery/recommendations (`/videos`, `/videos/recommendations`).
 """
 
 import os
+import re
 import uuid
 import aiofiles
 from datetime import datetime, timezone, timedelta
-from typing import List, Optional, Dict, Any
+from typing import List, Optional, Dict, Any, Set
 from fastapi import (
-    APIRouter, HTTPException, status, Depends, Query, 
+    APIRouter, HTTPException, status, Depends, Query,
     UploadFile, File, Form, Request, Header
 )
 from fastapi.responses import StreamingResponse
@@ -26,7 +25,6 @@ from bson import ObjectId
 
 from app.schemas.all_schemas import (
     ChannelCreatePayload,
-    ChannelUpdatePayload,
     ChannelResponse,
     VideoResponse,
     VideoUpdate,
@@ -34,24 +32,36 @@ from app.schemas.all_schemas import (
     VideoCommentResponse,
     PlaylistCreatePayload,
     PlaylistResponse,
+    PlaylistDetailResponse,
+    SaveVideoPayload,
+    SavedVideoEntryResponse,
+    YouTubeSavedMetadata,
+    YouTubeSearchResponse,
+    YouTubeCategoriesResponse,
+    YouTubeVideoStatusResponse,
+    VideoStreamUrlResponse,
     WatchProgressPayload,
     WatchHistoryResponse,
-    CreatorAnalyticsResponse
+    CreatorAnalyticsResponse,
 )
 from app.database.client import get_database
 from app.api.deps import get_current_user, get_optional_current_user
 from app.core.rate_limit import check_video_upload_rate_limit, check_video_comment_rate_limit
 from app.core.scanner import scan_quarantined_media, QUARANTINE_DIR
-from app.services import video_service
+from app.services import video_service, youtube_service
 from app.services.identity_service import get_blocked_users
+from app.services.media_service import (
+    get_storage_adapter,
+    S3StorageAdapter,
+    LocalDevStorageAdapter,
+)
 
 router = APIRouter(prefix="/videos", tags=["Zynova Video & Shorts Platform"])
 
-# Local storage configuration
 STORAGE_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", "storage", "videos"))
 os.makedirs(STORAGE_DIR, exist_ok=True)
 
-MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB max limit
+MAX_VIDEO_SIZE = 100 * 1024 * 1024  # 100MB multipart limit
 CHUNK_SIZE = 1024 * 1024            # 1MB chunk size
 ALLOWED_MIME_TYPES = {
     "video/mp4": ".mp4",
@@ -69,6 +79,9 @@ MAGIC_BYTES = {
     b"\x00\x00\x00\x14ftypqt": "video/quicktime"
 }
 
+RANGE_HEADER_RE = re.compile(r"^bytes=(\d*)-(\d*)$")
+
+
 def verify_video_magic_bytes(header_bytes: bytes) -> bool:
     if len(header_bytes) < 4:
         return False
@@ -77,14 +90,21 @@ def verify_video_magic_bytes(header_bytes: bytes) -> bool:
             return True
     return False
 
-def build_video_response(v: dict, current_user_id: Optional[str] = None) -> VideoResponse:
+
+def build_video_response(
+    v: dict,
+    current_user_id: Optional[str] = None,
+    saved_ids: Optional[Set[str]] = None,
+) -> VideoResponse:
     likes_list = v.get("likes", [])
     dislikes_list = v.get("dislikes", [])
+    vid_id = str(v["_id"])
     is_liked = (current_user_id in likes_list) if current_user_id else False
     is_owner = (current_user_id == v.get("owner_id")) if current_user_id else False
+    is_saved = (vid_id in saved_ids) if saved_ids is not None else False
 
     return VideoResponse(
-        id=str(v["_id"]),
+        id=vid_id,
         owner_id=v["owner_id"],
         owner_username=v.get("owner_username", ""),
         owner_full_name=v.get("owner_full_name", ""),
@@ -111,11 +131,82 @@ def build_video_response(v: dict, current_user_id: Optional[str] = None) -> Vide
         dislikes_count=v.get("dislikes_count", len(dislikes_list)),
         comments_count=v.get("comments_count", 0),
         is_liked=is_liked,
-        is_saved=False,
+        is_saved=is_saved,
         is_owner=is_owner,
         created_at=v["created_at"],
         updated_at=v.get("updated_at", v["created_at"])
     )
+
+
+def _playlist_to_response(p: dict) -> PlaylistResponse:
+    return PlaylistResponse(
+        id=str(p["_id"]),
+        owner_id=p["owner_id"],
+        owner_username=p["owner_username"],
+        title=p["title"],
+        description=p.get("description"),
+        visibility=p["visibility"],
+        video_ids=p.get("video_ids", []),
+        videos_count=p.get("videos_count", len(p.get("video_ids", []))),
+        created_at=p["created_at"],
+        updated_at=p["updated_at"],
+    )
+
+
+def _check_video_stream_access(video: dict, current_uid: Optional[str]) -> None:
+    if video.get("is_deleted") or video.get("moderation_status") in ("removed", "rejected", "hidden"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+    is_owner = bool(current_uid and current_uid == video.get("owner_id"))
+    if video.get("status", "published") != "published" and not is_owner:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Video is not published yet")
+    if video.get("visibility") == "private" and not is_owner:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Private video stream unauthorized: content is restricted to creator."
+        )
+
+
+def _parse_byte_range(range_header: Optional[str], file_size: int) -> tuple[int, int, bool]:
+    """Parses RFC 9110 Range header and raises HTTP 416 on unsatisfiable bounds."""
+    if not range_header:
+        return 0, max(0, file_size - 1), False
+    match = RANGE_HEADER_RE.match(range_header.strip())
+    if not match:
+        raise HTTPException(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            detail="Malformed Range header",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    start_str, end_str = match.group(1), match.group(2)
+    if not start_str and not end_str:
+        raise HTTPException(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            detail="Empty Range header",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    if not start_str:
+        suffix_len = int(end_str)
+        if suffix_len <= 0:
+            raise HTTPException(
+                status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+                detail="Invalid suffix range",
+                headers={"Content-Range": f"bytes */{file_size}"},
+            )
+        start = max(0, file_size - suffix_len)
+        end = file_size - 1
+    else:
+        start = int(start_str)
+        end = int(end_str) if end_str else (file_size - 1)
+        end = min(end, file_size - 1)
+
+    if start < 0 or start >= file_size or end < start:
+        raise HTTPException(
+            status_code=status.HTTP_416_RANGE_NOT_SATISFIABLE,
+            detail="Requested range not satisfiable",
+            headers={"Content-Range": f"bytes */{file_size}"},
+        )
+    return start, end, True
+
 
 # -------------------------------------------------------------
 # 1. Creator Channels
@@ -154,6 +245,7 @@ async def create_or_update_channel(
     except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+
 @router.get("/channels/{identifier}", response_model=ChannelResponse)
 async def get_channel(identifier: str, current_user: Optional[dict] = Depends(get_optional_current_user)):
     try:
@@ -178,6 +270,7 @@ async def get_channel(identifier: str, current_user: Optional[dict] = Depends(ge
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+
 @router.post("/channels/{channel_id}/subscribe", status_code=status.HTTP_200_OK)
 async def subscribe_channel(channel_id: str, current_user: dict = Depends(get_current_user)):
     try:
@@ -187,6 +280,7 @@ async def subscribe_channel(channel_id: str, current_user: dict = Depends(get_cu
     except (ValueError, PermissionError) as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
+
 @router.get("/channels/{channel_id}/analytics", response_model=CreatorAnalyticsResponse)
 async def get_analytics(channel_id: str, current_user: dict = Depends(get_current_user)):
     try:
@@ -194,8 +288,9 @@ async def get_analytics(channel_id: str, current_user: dict = Depends(get_curren
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+
 # -------------------------------------------------------------
-# 2. Video Upload & Publishing
+# 2. Video Upload & Publishing (Cloudflare R2 + Local Dev Adapter)
 # -------------------------------------------------------------
 
 @router.post("", response_model=VideoResponse, status_code=status.HTTP_201_CREATED)
@@ -227,7 +322,6 @@ async def upload_video(
     ext = ALLOWED_MIME_TYPES[content_type]
     random_filename = f"{uuid.uuid4().hex}{ext}"
     quarantine_path = os.path.join(QUARANTINE_DIR, f"quarantine_{random_filename}")
-    dest_path = os.path.join(STORAGE_DIR, random_filename)
 
     total_bytes = 0
     header_checked = False
@@ -274,14 +368,32 @@ async def upload_video(
                 pass
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Uploaded video failed security quarantine scan")
 
-    os.rename(quarantine_path, dest_path)
+    adapter = get_storage_adapter()
+    is_public_obj = visibility == "public"
+    if isinstance(adapter, S3StorageAdapter):
+        storage_key = f"videos/{current_user['id'][:8]}/{random_filename}"
+        storage_provider = "r2"
+        try:
+            await adapter.save_file(quarantine_path, storage_key, content_type, is_public=is_public_obj)
+        finally:
+            if os.path.exists(quarantine_path):
+                try:
+                    os.remove(quarantine_path)
+                except Exception:
+                    pass
+    else:
+        storage_key = random_filename
+        storage_provider = "local"
+        dest_path = os.path.join(STORAGE_DIR, random_filename)
+        os.rename(quarantine_path, dest_path)
+
     now = datetime.now(timezone.utc)
     db = get_database()
 
     # Channel resolution
     channel_handle = None
     channel_name = None
-    if channel_id:
+    if channel_id and ObjectId.is_valid(channel_id):
         ch = await db.creator_channels.find_one({"_id": ObjectId(channel_id)})
         if ch:
             channel_handle = ch.get("handle")
@@ -299,13 +411,16 @@ async def upload_video(
         "channel_name": channel_name,
         "title": title.strip(),
         "description": description.strip() if description else None,
-        "storage_key": random_filename,
+        "storage_key": storage_key,
+        "storage_provider": storage_provider,
         "mime_type": content_type,
         "file_size_bytes": total_bytes,
         "duration_seconds": 60.0 if is_short else 120.0,
         "thumbnail_url": thumbnail_url,
         "visibility": visibility,
         "status": "published",
+        "moderation_status": "approved",
+        "is_deleted": False,
         "category": category,
         "is_short": is_short,
         "aspect_ratio": "9:16" if is_short else "16:9",
@@ -324,132 +439,325 @@ async def upload_video(
     insert_res = await db.videos.insert_one(video_doc)
     video_doc["_id"] = insert_res.inserted_id
 
-    return build_video_response(video_doc, current_user["id"])
+    return build_video_response(video_doc, current_user["id"], set())
+
 
 # -------------------------------------------------------------
-# 3. Video Playback & Feeds
+# 3. Feeds, YouTube Proxy, Saved Videos, Playlists & History
+# (All static/prefixed routes registered BEFORE /{video_id})
 # -------------------------------------------------------------
 
 @router.get("", response_model=List[VideoResponse])
 async def list_videos(
     category: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    is_short: Optional[bool] = Query(None),
     current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
     current_uid = current_user["id"] if current_user else None
-    videos = await video_service.get_recommended_videos(current_uid, category=category, limit=limit)
-    return [build_video_response(v, current_uid) for v in videos]
+    videos = await video_service.get_feed_videos(
+        current_uid, category=category, limit=limit, offset=offset, is_short=is_short
+    )
+    saved_ids = await video_service.get_saved_video_ids(current_uid)
+    return [build_video_response(v, current_uid, saved_ids) for v in videos]
+
 
 @router.get("/shorts", response_model=List[VideoResponse])
 async def list_shorts_feed(
     limit: int = Query(15, ge=1, le=30),
+    offset: int = Query(0, ge=0),
     current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
-    db = get_database()
     current_uid = current_user["id"] if current_user else None
-    query = {"is_short": True, "visibility": "public", "status": "published"}
+    shorts = await video_service.get_feed_videos(
+        current_uid, limit=limit, offset=offset, is_short=True
+    )
+    saved_ids = await video_service.get_saved_video_ids(current_uid)
+    return [build_video_response(s, current_uid, saved_ids) for s in shorts]
 
-    if current_uid:
-        blocked = await get_blocked_users(db, current_uid)
-        if blocked:
-            query["owner_id"] = {"$nin": blocked}
-
-    cursor = db.videos.find(query).sort("created_at", -1).limit(limit)
-    shorts = []
-    async for s in cursor:
-        shorts.append(build_video_response(s, current_uid))
-    return shorts
 
 @router.get("/recommendations", response_model=List[VideoResponse])
 async def get_recommendations(
     category: Optional[str] = Query(None),
     limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
     current_user: Optional[dict] = Depends(get_optional_current_user)
 ):
     current_uid = current_user["id"] if current_user else None
-    videos = await video_service.get_recommended_videos(current_uid, category=category, limit=limit)
-    return [build_video_response(v, current_uid) for v in videos]
+    videos = await video_service.get_recommended_videos(
+        current_uid, category=category, limit=limit, offset=offset
+    )
+    saved_ids = await video_service.get_saved_video_ids(current_uid)
+    return [build_video_response(v, current_uid, saved_ids) for v in videos]
 
-@router.get("/youtube")
+
+@router.get("/youtube", response_model=YouTubeSearchResponse)
 async def get_youtube_videos_proxy(
     q: Optional[str] = Query(None, description="Search keyword"),
     category: Optional[str] = Query(None, description="Category filter"),
-    max_results: int = Query(15, ge=1, le=50)
+    max_results: int = Query(15, ge=1, le=50),
+    page_token: Optional[str] = Query(None, description="YouTube API pagination token"),
+    pageToken: Optional[str] = Query(None, description="YouTube API pagination token alias"),
 ):
     """
-    Sovereign YouTube Proxy Endpoint:
-    Queries real YouTube Data API v3 when YOUTUBE_API_KEY is configured on the backend.
-    Never exposes API keys in mobile frontend.
-    Returns clear unconfigured status without fabricated trending videos.
+    Sovereign YouTube Data API v3 Proxy:
+    Supports cursor pagination (`page_token` / `pageToken`), single-batch `videos.list` enrichment
+    for duration & viewCount, embeddability filtering, and Redis/memory TTL quota caching.
     """
-    from app.core.config import settings
-    import httpx
+    effective_token = page_token or pageToken
+    return await youtube_service.search_youtube_videos(
+        q=q,
+        category=category,
+        max_results=max_results,
+        page_token=effective_token,
+    )
 
-    api_key = settings.YOUTUBE_API_KEY
-    if not api_key:
-        return {
-            "configured": False,
-            "query": q or "",
-            "category": category or "All",
-            "videos": [],
-            "message": "YouTube Data API key (YOUTUBE_API_KEY) not configured on the backend server. Real video search available via external handoff."
-        }
 
-    search_query = q or (f"{category} tech india" if category and category != "All" else "technology india")
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.get(
-                "https://www.googleapis.com/youtube/v3/search",
-                params={
-                    "part": "snippet",
-                    "q": search_query,
-                    "type": "video",
-                    "maxResults": max_results,
-                    "key": api_key,
-                }
+@router.get("/youtube/categories", response_model=YouTubeCategoriesResponse)
+async def get_youtube_categories_proxy(
+    region_code: str = Query("IN", min_length=2, max_length=2, description="2-letter ISO region code")
+):
+    """Official YouTube videoCategories.list discovery endpoint with 24h TTL caching."""
+    return await youtube_service.get_youtube_categories(region_code=region_code)
+
+
+@router.get("/youtube/status/{video_id}", response_model=YouTubeVideoStatusResponse)
+async def get_youtube_video_status(video_id: str):
+    """Checks YouTube video existence, embeddability, duration, and viewCount."""
+    return await youtube_service.get_youtube_video_status(video_id)
+
+
+# -------------------------------------------------------------
+# 4. Saved Videos (GET / POST / DELETE /videos/saved)
+# -------------------------------------------------------------
+
+@router.get("/saved", response_model=List[SavedVideoEntryResponse])
+async def list_saved_videos_endpoint(
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    rows = await video_service.list_saved_videos(current_user, limit=limit, offset=offset)
+    saved_ids = await video_service.get_saved_video_ids(current_user["id"])
+    responses: List[SavedVideoEntryResponse] = []
+    for row in rows:
+        entry = row["entry"]
+        vid_doc = row["video"]
+        yt_meta = entry.get("youtube_metadata")
+        responses.append(
+            SavedVideoEntryResponse(
+                id=str(entry["_id"]),
+                user_id=entry["user_id"],
+                source=entry["source"],
+                video_id=entry["video_id"],
+                saved_at=entry["saved_at"],
+                video=build_video_response(vid_doc, current_user["id"], saved_ids) if vid_doc else None,
+                youtube_metadata=YouTubeSavedMetadata(**yt_meta) if yt_meta else None,
             )
-            if resp.status_code != 200:
-                err_data = resp.json() if resp.headers.get("content-type", "").startswith("application/json") else {}
-                err_msg = err_data.get("error", {}).get("message", f"YouTube API error HTTP {resp.status_code}")
-                return {
-                    "configured": True,
-                    "query": search_query,
-                    "videos": [],
-                    "message": err_msg
-                }
+        )
+    return responses
 
-            data = resp.json()
-            items = []
-            for item in data.get("items", []):
-                snippet = item.get("snippet", {})
-                vid_id = item.get("id", {}).get("videoId")
-                if not vid_id:
-                    continue
-                thumbs = snippet.get("thumbnails", {})
-                thumb_url = thumbs.get("high", {}).get("url") or thumbs.get("medium", {}).get("url") or ""
-                items.append({
-                    "id": vid_id,
-                    "title": snippet.get("title", ""),
-                    "description": snippet.get("description", ""),
-                    "channelTitle": snippet.get("channelTitle", "YouTube Creator"),
-                    "channelId": snippet.get("channelId"),
-                    "publishedAt": snippet.get("publishedAt", ""),
-                    "thumbnailUrl": thumb_url,
-                    "category": category or "Tech"
-                })
 
-            return {
-                "configured": True,
-                "query": search_query,
-                "videos": items
-            }
-    except Exception as e:
-        return {
-            "configured": True,
-            "query": search_query,
-            "videos": [],
-            "message": f"Network error contacting YouTube Data API: {str(e)}"
-        }
+@router.post("/saved", response_model=SavedVideoEntryResponse, status_code=status.HTTP_201_CREATED)
+async def save_video_endpoint(
+    payload: SaveVideoPayload,
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        res = await video_service.save_video_for_user(current_user, payload)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+    entry = res["entry"]
+    vid_doc = res["video"]
+    yt_meta = entry.get("youtube_metadata")
+    saved_ids = {entry["video_id"]} if entry["source"] == "zenova" else set()
+    return SavedVideoEntryResponse(
+        id=str(entry["_id"]),
+        user_id=entry["user_id"],
+        source=entry["source"],
+        video_id=entry["video_id"],
+        saved_at=entry["saved_at"],
+        video=build_video_response(vid_doc, current_user["id"], saved_ids) if vid_doc else None,
+        youtube_metadata=YouTubeSavedMetadata(**yt_meta) if yt_meta else None,
+    )
+
+
+@router.delete("/saved/{video_id}", status_code=status.HTTP_200_OK)
+async def unsave_video_by_path(
+    video_id: str,
+    source: Optional[str] = Query(None, pattern="^(zenova|youtube)$"),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await video_service.unsave_video_for_user(current_user, video_id, source=source)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.delete("/saved", status_code=status.HTTP_200_OK)
+async def unsave_video_by_query(
+    video_id: str = Query(..., min_length=1, max_length=64),
+    source: Optional[str] = Query(None, pattern="^(zenova|youtube)$"),
+    current_user: dict = Depends(get_current_user),
+):
+    try:
+        return await video_service.unsave_video_for_user(current_user, video_id, source=source)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+# -------------------------------------------------------------
+# 5. Playlists (Static & Prefixed Routes Placed Before /{video_id})
+# -------------------------------------------------------------
+
+@router.get("/playlists", response_model=List[PlaylistResponse])
+async def list_playlists(
+    limit: int = Query(20, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    docs = await video_service.list_user_playlists(current_user, limit=limit, offset=offset)
+    return [_playlist_to_response(p) for p in docs]
+
+
+@router.post("/playlists", response_model=PlaylistResponse, status_code=status.HTTP_201_CREATED)
+async def create_new_playlist(payload: PlaylistCreatePayload, current_user: dict = Depends(get_current_user)):
+    p = await video_service.create_playlist(
+        current_user=current_user,
+        title=payload.title,
+        description=payload.description,
+        visibility=payload.visibility,
+        video_ids=payload.video_ids
+    )
+    return _playlist_to_response(p)
+
+
+@router.get("/playlists/{playlist_id}", response_model=PlaylistDetailResponse)
+async def get_playlist_detail_endpoint(
+    playlist_id: str,
+    current_user: Optional[dict] = Depends(get_optional_current_user),
+):
+    try:
+        res = await video_service.get_playlist_detail(playlist_id, current_user)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+    current_uid = current_user["id"] if current_user else None
+    saved_ids = await video_service.get_saved_video_ids(current_uid)
+    base = _playlist_to_response(res["playlist"]).model_dump()
+    return PlaylistDetailResponse(
+        **base,
+        videos=[build_video_response(v, current_uid, saved_ids) for v in res["videos"]],
+    )
+
+
+@router.delete("/playlists/{playlist_id}", status_code=status.HTTP_200_OK)
+async def delete_playlist_endpoint(playlist_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return await video_service.delete_playlist(current_user, playlist_id)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+@router.post("/playlists/{playlist_id}/videos/{video_id}", status_code=status.HTTP_200_OK)
+async def add_to_playlist(
+    playlist_id: str,
+    video_id: str,
+    action: str = Query("add", pattern="^(add|remove)$"),
+    current_user: dict = Depends(get_current_user)
+):
+    try:
+        return await video_service.add_or_remove_playlist_video(current_user, playlist_id, video_id, action)
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+
+
+# -------------------------------------------------------------
+# 6. Watch History
+# -------------------------------------------------------------
+
+@router.get("/user/history", response_model=List[WatchHistoryResponse])
+async def get_history(
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    current_user: dict = Depends(get_current_user),
+):
+    entries = await video_service.get_user_watch_history(current_user, limit=limit, offset=offset)
+    saved_ids = await video_service.get_saved_video_ids(current_user["id"])
+    return [
+        WatchHistoryResponse(
+            video=build_video_response(e["video"], current_user["id"], saved_ids),
+            playback_position_seconds=e["playback_position_seconds"],
+            last_watched_at=e["last_watched_at"],
+            completed=e["completed"]
+        )
+        for e in entries
+    ]
+
+
+@router.delete("/user/history/{video_id}", status_code=status.HTTP_200_OK)
+async def delete_history_item(video_id: str, current_user: dict = Depends(get_current_user)):
+    try:
+        return await video_service.delete_watch_history_entry(current_user, video_id)
+    except LookupError as e:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+
+
+@router.delete("/user/history", status_code=status.HTTP_200_OK)
+async def clear_history_endpoint(current_user: dict = Depends(get_current_user)):
+    return await video_service.clear_watch_history(current_user)
+
+
+@router.get("/users/{user_id}", response_model=List[VideoResponse])
+async def list_user_videos(
+    user_id: str,
+    limit: int = Query(25, ge=1, le=50),
+    offset: int = Query(0, ge=0),
+    current_user: Optional[dict] = Depends(get_optional_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    my_id = current_user["id"] if current_user else None
+    query: dict = {
+        "owner_id": user_id,
+        "is_deleted": {"$ne": True},
+        "moderation_status": {"$nin": ["removed", "rejected", "hidden"]},
+    }
+    if my_id != user_id:
+        query["visibility"] = "public"
+        query["status"] = "published"
+
+    cursor = db.videos.find(query).sort("created_at", -1).skip(offset).limit(limit)
+    saved_ids = await video_service.get_saved_video_ids(my_id)
+    items = []
+    async for v in cursor:
+        items.append(build_video_response(v, my_id, saved_ids))
+    return items
+
+
+# -------------------------------------------------------------
+# 7. Dynamic Video Detail, R2/Local Range Streaming & Engagement
+# -------------------------------------------------------------
 
 @router.get("/{video_id}", response_model=VideoResponse)
 async def get_video_detail(
@@ -467,12 +775,58 @@ async def get_video_detail(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
     current_uid = current_user["id"] if current_user else None
+    _check_video_stream_access(video, current_uid)
+    saved_ids = await video_service.get_saved_video_ids(current_uid)
+    return build_video_response(video, current_uid, saved_ids)
 
-    # Privacy check: private videos accessible only to owner
-    if video.get("visibility") == "private" and video.get("owner_id") != current_uid:
-        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="This video is private")
 
-    return build_video_response(video, current_uid)
+@router.get("/{video_id}/stream-url", response_model=VideoStreamUrlResponse)
+async def get_video_stream_url(
+    video_id: str,
+    expires_in: int = Query(300, ge=30, le=900),
+    current_user: Optional[dict] = Depends(get_optional_current_user),
+):
+    """Returns a short-lived signed Cloudflare R2 URL (or authorized backend stream route in dev)."""
+    db = get_database()
+    try:
+        video_obj = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video ID")
+
+    video = await db.videos.find_one({"_id": video_obj})
+    if not video:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
+
+    current_uid = current_user["id"] if current_user else None
+    _check_video_stream_access(video, current_uid)
+
+    mime_type = (video.get("mime_type") or "").lower().split(";")[0].strip()
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Invalid video media type")
+
+    adapter = get_storage_adapter()
+    meta = await adapter.get_object_metadata(video["storage_key"])
+    if meta is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video stream object missing")
+
+    if isinstance(adapter, S3StorageAdapter):
+        signed_url = await adapter.generate_presigned_download(video["storage_key"], expires_in=expires_in)
+        return VideoStreamUrlResponse(
+            video_id=video_id,
+            stream_url=signed_url,
+            delivery="presigned_r2",
+            expires_in=expires_in,
+            mime_type=mime_type,
+        )
+
+    return VideoStreamUrlResponse(
+        video_id=video_id,
+        stream_url=f"/api/v1/videos/{video_id}/stream",
+        delivery="backend_stream",
+        expires_in=expires_in,
+        mime_type=mime_type,
+    )
+
 
 @router.get("/{video_id}/stream")
 async def stream_video(
@@ -491,58 +845,37 @@ async def stream_video(
     if not video:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
-    # Authorize stream playback: private videos require owner authentication
     current_uid = current_user["id"] if current_user else None
-    if video.get("visibility") == "private":
-        if not current_uid or current_uid != video.get("owner_id"):
-            raise HTTPException(
-                status_code=status.HTTP_403_FORBIDDEN,
-                detail="Private video stream unauthorized: content is restricted to creator."
-            )
+    _check_video_stream_access(video, current_uid)
 
-    file_path = os.path.join(STORAGE_DIR, video["storage_key"])
-    if not os.path.exists(file_path):
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video stream file not found on disk")
+    mime_type = (video.get("mime_type") or "").lower().split(";")[0].strip()
+    if mime_type not in ALLOWED_MIME_TYPES:
+        raise HTTPException(status_code=status.HTTP_415_UNSUPPORTED_MEDIA_TYPE, detail="Unsupported video content type")
 
-    file_size = os.path.getsize(file_path)
-    start = 0
-    end = file_size - 1
+    adapter = get_storage_adapter()
+    meta = await adapter.get_object_metadata(video["storage_key"])
+    if meta is None or not meta.get("file_size"):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video stream object not found")
 
-    if range:
-        try:
-            bytes_range = range.replace("bytes=", "").split("-")
-            start = int(bytes_range[0])
-            if bytes_range[1]:
-                end = int(bytes_range[1])
-        except Exception:
-            pass
-
+    file_size = int(meta["file_size"])
+    start, end, is_partial = _parse_byte_range(range, file_size)
     content_length = (end - start) + 1
 
-    async def file_streamer():
-        async with aiofiles.open(file_path, mode="rb") as f:
-            await f.seek(start)
-            bytes_to_read = content_length
-            while bytes_to_read > 0:
-                chunk_to_read = min(CHUNK_SIZE, bytes_to_read)
-                data = await f.read(chunk_to_read)
-                if not data:
-                    break
-                bytes_to_read -= len(data)
-                yield data
-
     headers = {
-        "Content-Range": f"bytes {start}-{end}/{file_size}",
         "Accept-Ranges": "bytes",
         "Content-Length": str(content_length),
-        "Content-Type": video["mime_type"],
+        "Content-Type": mime_type,
+        "Cache-Control": "private, max-age=60" if video.get("visibility") == "private" else "public, max-age=300",
     }
+    if is_partial:
+        headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
 
-    return StreamingResponse(file_streamer(), status_code=206, headers=headers)
+    return StreamingResponse(
+        adapter.stream_range(video["storage_key"], start, end, CHUNK_SIZE),
+        status_code=206 if is_partial else 200,
+        headers=headers,
+    )
 
-# -------------------------------------------------------------
-# 4. Engagement (Feedback, Comments, Progress, History, Views)
-# -------------------------------------------------------------
 
 @router.post("/{video_id}/view", status_code=status.HTTP_200_OK)
 async def record_video_view(
@@ -557,14 +890,13 @@ async def record_video_view(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video ID")
 
     video = await db.videos.find_one({"_id": video_obj})
-    if not video:
+    if not video or video.get("is_deleted"):
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
     client_ip = request.client.host if request.client else "unknown"
     viewer_identifier = current_user["id"] if current_user else f"ip_{client_ip}"
     now = datetime.now(timezone.utc)
 
-    # 10-minute cooldown window per viewer
     cooldown_threshold = now - timedelta(minutes=10)
     existing_view = await db.video_views.find_one({
         "video_id": video_id,
@@ -586,6 +918,7 @@ async def record_video_view(
 
     return {"recorded": False, "reason": "cooldown"}
 
+
 @router.post("/{video_id}/feedback", status_code=status.HTTP_200_OK)
 async def submit_feedback(
     video_id: str,
@@ -597,27 +930,40 @@ async def submit_feedback(
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
 
+
 @router.post("/{video_id}/like", status_code=status.HTTP_200_OK)
 async def legacy_like(video_id: str, current_user: dict = Depends(get_current_user)):
     db = get_database()
-    video_obj = ObjectId(video_id)
+    try:
+        video_obj = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video ID")
     my_id = current_user["id"]
     await db.videos.update_one({"_id": video_obj}, {"$addToSet": {"likes": my_id}})
     v = await db.videos.find_one({"_id": video_obj})
+    if not v:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     likes_count = len(v.get("likes", []))
     await db.videos.update_one({"_id": video_obj}, {"$set": {"likes_count": likes_count}})
     return {"success": True, "likes_count": likes_count, "is_liked": True}
 
+
 @router.delete("/{video_id}/like", status_code=status.HTTP_200_OK)
 async def legacy_unlike(video_id: str, current_user: dict = Depends(get_current_user)):
     db = get_database()
-    video_obj = ObjectId(video_id)
+    try:
+        video_obj = ObjectId(video_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid video ID")
     my_id = current_user["id"]
     await db.videos.update_one({"_id": video_obj}, {"$pull": {"likes": my_id}})
     v = await db.videos.find_one({"_id": video_obj})
+    if not v:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
     likes_count = len(v.get("likes", []))
     await db.videos.update_one({"_id": video_obj}, {"$set": {"likes_count": likes_count}})
     return {"success": True, "likes_count": likes_count, "is_liked": False}
+
 
 @router.get("/{video_id}/comments", response_model=List[VideoCommentResponse])
 async def list_comments(video_id: str, limit: int = Query(50, ge=1, le=100)):
@@ -639,6 +985,7 @@ async def list_comments(video_id: str, limit: int = Query(50, ge=1, le=100)):
             is_owner=False
         ))
     return comments
+
 
 @router.post("/{video_id}/comments", response_model=VideoCommentResponse, status_code=status.HTTP_201_CREATED)
 async def add_comment(
@@ -667,95 +1014,28 @@ async def add_comment(
         is_owner=True
     )
 
+
 @router.post("/{video_id}/progress", status_code=status.HTTP_200_OK)
 async def report_progress(
     video_id: str,
     payload: WatchProgressPayload,
     current_user: dict = Depends(get_current_user)
 ):
-    return await video_service.record_watch_progress(
-        current_user=current_user,
-        video_id=video_id,
-        position_seconds=payload.playback_position_seconds,
-        duration_seconds=payload.duration_seconds,
-        completed=payload.completed
-    )
-
-@router.get("/user/history", response_model=List[WatchHistoryResponse])
-async def get_history(current_user: dict = Depends(get_current_user)):
-    entries = await video_service.get_user_watch_history(current_user)
-    return [
-        WatchHistoryResponse(
-            video=build_video_response(e["video"], current_user["id"]),
-            playback_position_seconds=e["playback_position_seconds"],
-            last_watched_at=e["last_watched_at"],
-            completed=e["completed"]
-        )
-        for e in entries
-    ]
-
-# -------------------------------------------------------------
-# 5. Playlists
-# -------------------------------------------------------------
-
-@router.post("/playlists", response_model=PlaylistResponse, status_code=status.HTTP_201_CREATED)
-async def create_new_playlist(payload: PlaylistCreatePayload, current_user: dict = Depends(get_current_user)):
-    p = await video_service.create_playlist(
-        current_user=current_user,
-        title=payload.title,
-        description=payload.description,
-        visibility=payload.visibility,
-        video_ids=payload.video_ids
-    )
-    return PlaylistResponse(
-        id=str(p["_id"]),
-        owner_id=p["owner_id"],
-        owner_username=p["owner_username"],
-        title=p["title"],
-        description=p.get("description"),
-        visibility=p["visibility"],
-        video_ids=p["video_ids"],
-        videos_count=p["videos_count"],
-        created_at=p["created_at"],
-        updated_at=p["updated_at"]
-    )
-
-@router.post("/playlists/{playlist_id}/videos/{video_id}", status_code=status.HTTP_200_OK)
-async def add_to_playlist(
-    playlist_id: str,
-    video_id: str,
-    action: str = Query("add", pattern="^(add|remove)$"),
-    current_user: dict = Depends(get_current_user)
-):
     try:
-        return await video_service.add_or_remove_playlist_video(current_user, playlist_id, video_id, action)
+        return await video_service.record_watch_progress(
+            current_user=current_user,
+            video_id=video_id,
+            position_seconds=payload.playback_position_seconds,
+            duration_seconds=payload.duration_seconds,
+            completed=payload.completed
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
-# -------------------------------------------------------------
-# 7. User & Related Videos
-# -------------------------------------------------------------
-
-@router.get("/users/{user_id}", response_model=List[VideoResponse])
-async def list_user_videos(
-    user_id: str,
-    limit: int = Query(25, ge=1, le=50),
-    current_user: Optional[dict] = Depends(get_optional_current_user)
-):
-    db = get_database()
-    if db is None:
-        return []
-
-    my_id = current_user["id"] if current_user else None
-    query: dict = {"owner_id": user_id}
-    if my_id != user_id:
-        query["visibility"] = "public"
-
-    cursor = db.videos.find(query).sort("created_at", -1).limit(limit)
-    items = []
-    async for v in cursor:
-        items.append(build_video_response(v, my_id))
-    return items
 
 @router.get("/{video_id}/related", response_model=List[VideoResponse])
 async def list_related_videos(
@@ -777,16 +1057,25 @@ async def list_related_videos(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Video not found")
 
     my_id = current_user["id"] if current_user else None
-    query = {
+    query: Dict[str, Any] = {
         "_id": {"$ne": video_obj},
-        "visibility": "public"
+        "visibility": "public",
+        "status": "published",
+        "is_deleted": {"$ne": True},
+        "moderation_status": {"$nin": ["removed", "rejected", "hidden"]},
     }
+    if my_id:
+        blocked = await get_blocked_users(db, my_id)
+        if blocked:
+            query["owner_id"] = {"$nin": blocked}
 
     cursor = db.videos.find(query).sort("view_count", -1).limit(limit)
+    saved_ids = await video_service.get_saved_video_ids(my_id)
     items = []
     async for v in cursor:
-        items.append(build_video_response(v, my_id))
+        items.append(build_video_response(v, my_id, saved_ids))
     return items
+
 
 @router.patch("/{video_id}", response_model=VideoResponse)
 async def update_video_metadata(
@@ -821,7 +1110,9 @@ async def update_video_metadata(
 
     await db.videos.update_one({"_id": video_obj}, {"$set": update_fields})
     updated = await db.videos.find_one({"_id": video_obj})
-    return build_video_response(updated, current_user["id"])
+    saved_ids = await video_service.get_saved_video_ids(current_user["id"])
+    return build_video_response(updated, current_user["id"], saved_ids)
+
 
 @router.delete("/{video_id}", status_code=status.HTTP_200_OK)
 async def delete_video(video_id: str, current_user: dict = Depends(get_current_user)):
@@ -838,14 +1129,23 @@ async def delete_video(video_id: str, current_user: dict = Depends(get_current_u
     if video["owner_id"] != current_user["id"]:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot delete another user's video")
 
-    file_path = os.path.join(STORAGE_DIR, video["storage_key"])
-    if os.path.exists(file_path):
+    storage_key = video.get("storage_key", "")
+    adapter = get_storage_adapter()
+    if video.get("storage_provider") in ("r2", "s3") and isinstance(adapter, S3StorageAdapter):
         try:
-            os.remove(file_path)
+            await adapter.delete_file(storage_key)
         except Exception:
             pass
+    else:
+        file_path = os.path.join(STORAGE_DIR, storage_key)
+        if os.path.exists(file_path):
+            try:
+                os.remove(file_path)
+            except Exception:
+                pass
 
     await db.videos.delete_one({"_id": video_obj})
     await db.video_comments.delete_many({"video_id": video_id})
+    await db.video_saves.delete_many({"source": "zenova", "video_id": video_id})
+    await db.video_watch_history.delete_many({"video_id": video_id})
     return {"status": "deleted", "video_id": video_id}
-
