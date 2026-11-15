@@ -1,0 +1,79 @@
+[
+  {
+    "_id": "dish_01_1",
+    "name": "Special Ghee Roast Masala Dosa",
+    "description": "Crispy golden crepe with potato masala and aromatic clarified butter served with 3 chutneys & sambar.",
+    "price_paise": 16000,
+    "is_veg": true,
+    "is_available": true,
+    "category": "Tiffin",
+    "image_url": "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_01"
+  },
+  {
+    "_id": "dish_01_2",
+    "name": "South Indian Kumbakonam Degree Filter Coffee",
+    "description": "Traditional chicory blend frothed with hot rich milk in brass dabarah.",
+    "price_paise": 4500,
+    "is_veg": true,
+    "is_available": true,
+    "category": "Beverages",
+    "image_url": "https://images.unsplash.com/photo-1514432324607-a09d9b4aefdd?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_01"
+  },
+  {
+    "_id": "dish_01_3",
+    "name": "Steamed Button Idli Sambar Dip",
+    "description": "Mini rice cakes soaked in piping hot spicy lentil stew with ghee drizzle.",
+    "price_paise": 12000,
+    "is_veg": true,
+    "is_available": true,
+    "category": "Tiffin",
+    "image_url": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_01"
+  },
+  {
+    "_id": "dish_02_1",
+    "name": "Special Chicken Boneless Biryani",
+    "description": "Signature basmati rice layered with spiced tender chicken fillets, served with raita and mirchi ka salan.",
+    "price_paise": 32000,
+    "is_veg": false,
+    "is_available": true,
+    "category": "Biryani",
+    "image_url": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_02"
+  },
+  {
+    "_id": "dish_02_2",
+    "name": "Andhra Chilli Chicken Dry",
+    "description": "Deep-fried succulent chicken tossed in green chilies, curry leaves and roasted garlic.",
+    "price_paise": 28000,
+    "is_veg": false,
+    "is_available": true,
+    "category": "Starters",
+    "image_url": "https://images.unsplash.com/photo-1527477378377-17e940f92606?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_02"
+  },
+  {
+    "_id": "dish_03_1",
+    "name": "Ghee Podi Thatte Idli (2 Pcs)",
+    "description": "Plate-sized spongy steamed idli smothered in spicy gunpowder podi and steaming hot pure desi ghee.",
+    "price_paise": 14000,
+    "is_veg": true,
+    "is_available": true,
+    "category": "Tiffin",
+    "image_url": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_03"
+  },
+  {
+    "_id": "dish_03_2",
+    "name": "Open Butter Garlic Masala Dosa",
+    "description": "Crispy open-faced dosa seasoned with house garlic chutney and white butter slab.",
+    "price_paise": 17000,
+    "is_veg": true,
+    "is_available": true,
+    "category": "Dosas",
+    "image_url": "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=400&auto=format&fit=crop&q=80",
+    "restaurant_id": "rest_03"
+  }
+]

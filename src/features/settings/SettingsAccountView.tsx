@@ -2,12 +2,15 @@ import React, { useState, useEffect } from 'react';
 import { 
   Settings as SettingsIcon, Shield, User, Bell, Lock, 
   Database, Globe, Eye, Smartphone, HelpCircle, Check, 
-  LogOut, AlertTriangle, Loader2, Save, Trash2, KeyRound, Palette 
+  LogOut, AlertTriangle, Loader2, Save, Trash2, KeyRound, Palette,
+  Share2, RefreshCw, Unlink, Download, AlertCircle
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import { SUPPORTED_LOCALES_LIST, getLanguageMetadata } from '../../i18n';
 import type { AppLanguage } from '../../types';
+import { apiClient } from '../../services/apiClient';
+import { InstagramImportModal } from '../../components/social/InstagramImportModal';
 
 export const SettingsAccountView: React.FC = () => {
   const { preferences, updatePreferences } = useApp();
@@ -41,6 +44,75 @@ export const SettingsAccountView: React.FC = () => {
   const [deletePassword, setDeletePassword] = useState('');
   const [deleteError, setDeleteError] = useState('');
   const [isDeleting, setIsDeleting] = useState(false);
+
+  // Connected Accounts / Instagram State
+  const [igStatus, setIgStatus] = useState<{
+    connected: boolean;
+    username: string | null;
+    status: 'active' | 'needs_reconnect' | 'not_connected';
+    last_synced_at: string | null;
+    media_count: number | null;
+  } | null>(null);
+  const [igLoading, setIgLoading] = useState(false);
+  const [isImportModalOpen, setIsImportModalOpen] = useState(false);
+
+  useEffect(() => {
+    // Check URL parameters for ?ig=success or ?ig=error=<code>
+    const params = new URLSearchParams(window.location.search);
+    const igParam = params.get('ig');
+    if (igParam === 'success') {
+      showToast('Instagram connected successfully!');
+      // Clean query params from URL without reload
+      window.history.replaceState({}, document.title, window.location.pathname);
+    } else if (igParam === 'error') {
+      const errCode = params.get('error') || 'OAuth authorization failed';
+      showToast(`Instagram connection failed: ${errCode}`);
+      window.history.replaceState({}, document.title, window.location.pathname);
+    }
+
+    if (isAuthenticated) {
+      loadInstagramStatus();
+    }
+  }, [isAuthenticated]);
+
+  const loadInstagramStatus = async () => {
+    try {
+      setIgLoading(true);
+      const statusRes = await apiClient.getInstagramStatus();
+      setIgStatus(statusRes);
+    } catch (e) {
+      console.error('Failed to load Instagram status:', e);
+    } finally {
+      setIgLoading(false);
+    }
+  };
+
+  const handleConnectInstagram = async () => {
+    try {
+      setIgLoading(true);
+      const res = await apiClient.getInstagramAuthorizeUrl('web');
+      if (res.url) {
+        window.location.href = res.url;
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Failed to initiate Instagram connection.');
+      setIgLoading(false);
+    }
+  };
+
+  const handleDisconnectInstagram = async () => {
+    if (!window.confirm('Disconnect your Instagram account from Zynova?')) return;
+    try {
+      setIgLoading(true);
+      await apiClient.disconnectInstagram();
+      showToast('Instagram disconnected.');
+      await loadInstagramStatus();
+    } catch (err: any) {
+      showToast(err.message || 'Failed to disconnect Instagram.');
+    } finally {
+      setIgLoading(false);
+    }
+  };
 
   useEffect(() => {
     if (user) {
@@ -438,6 +510,86 @@ export const SettingsAccountView: React.FC = () => {
         </div>
       </div>
 
+      {/* Connected Accounts & Ecosystem Integrations */}
+      {isAuthenticated && (
+        <div className="p-6 rounded-2xl bg-slate-900/60 border border-white/10 space-y-4">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-2 text-violet-400 text-xs font-bold uppercase tracking-wider">
+              <Share2 className="w-4 h-4 text-violet-400" />
+              <span>Connected Accounts & Ecosystem Integrations</span>
+            </div>
+            {igLoading && <Loader2 className="w-4 h-4 text-violet-400 animate-spin" />}
+          </div>
+
+          <div className="p-4 rounded-xl bg-slate-800/40 border border-white/5 flex flex-col md:flex-row md:items-center justify-between gap-4">
+            <div className="flex items-start md:items-center gap-3">
+              <div className="w-10 h-10 rounded-2xl bg-gradient-to-tr from-amber-500 via-rose-500 to-purple-600 flex items-center justify-center text-white shrink-0 shadow-lg shadow-rose-500/20">
+                <Share2 className="w-5 h-5" />
+              </div>
+              <div>
+                <div className="flex items-center gap-2">
+                  <h4 className="text-sm font-bold text-white">Instagram (Meta Graph API)</h4>
+                  {igStatus?.connected && igStatus.status === 'active' && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 font-semibold">
+                      Connected
+                    </span>
+                  )}
+                  {igStatus?.connected && igStatus.status === 'needs_reconnect' && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300 border border-amber-500/30 font-semibold flex items-center gap-1">
+                      <AlertCircle className="w-3 h-3" />
+                      Reconnect Needed
+                    </span>
+                  )}
+                  {(!igStatus?.connected || igStatus.status === 'not_connected') && (
+                    <span className="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-slate-400 font-semibold">
+                      Not Connected
+                    </span>
+                  )}
+                </div>
+                <p className="text-xs text-slate-400 mt-0.5">
+                  {igStatus?.connected && igStatus.username
+                    ? `Linked account: @${igStatus.username} (${igStatus.media_count ?? 0} posts synced)`
+                    : 'Sync your photos, videos, and reels from your connected Instagram Business Account.'}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              {igStatus?.connected ? (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => setIsImportModalOpen(true)}
+                    className="px-3 py-1.5 rounded-xl bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white flex items-center gap-1.5 transition shadow-lg shadow-purple-600/30"
+                  >
+                    <Download className="w-3.5 h-3.5" />
+                    <span>Import Media</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleDisconnectInstagram}
+                    className="px-3 py-1.5 rounded-xl bg-white/5 hover:bg-rose-500/20 text-xs font-semibold text-rose-300 border border-rose-500/30 flex items-center gap-1.5 transition"
+                  >
+                    <Unlink className="w-3.5 h-3.5" />
+                    <span>Disconnect</span>
+                  </button>
+                </>
+              ) : (
+                <button
+                  type="button"
+                  onClick={handleConnectInstagram}
+                  disabled={igLoading}
+                  className="px-4 py-2 rounded-xl bg-gradient-to-r from-purple-600 to-rose-600 hover:from-purple-500 hover:to-rose-500 text-xs font-bold text-white flex items-center gap-1.5 transition shadow-lg shadow-rose-500/20 disabled:opacity-50"
+                >
+                  <Share2 className="w-3.5 h-3.5" />
+                  <span>Connect with Instagram</span>
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Account Lifecycle & Danger Zone */}
       {isAuthenticated && (
         <div className="p-6 rounded-2xl bg-rose-950/20 border border-rose-500/20 space-y-4">
@@ -523,6 +675,16 @@ export const SettingsAccountView: React.FC = () => {
           </div>
         </div>
       )}
+
+      {/* Instagram Media Import Modal */}
+      <InstagramImportModal
+        isOpen={isImportModalOpen}
+        onClose={() => setIsImportModalOpen(false)}
+        onImportComplete={() => {
+          showToast('Instagram media imported successfully into your feed!');
+          loadInstagramStatus();
+        }}
+      />
     </div>
   );
 };

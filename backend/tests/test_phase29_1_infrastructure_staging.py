@@ -57,9 +57,9 @@ async def test_redis_staging_resilience_and_telemetry():
 
 # 3. AI Providers: Credential Validation & Graceful Rejection
 def test_ai_providers_credential_state():
-    gemini = GeminiProvider()
-    openai = OpenAIProvider()
-    anthropic = AnthropicProvider()
+    gemini = GeminiProvider(api_key=settings.GEMINI_API_KEY)
+    openai = OpenAIProvider(api_key=settings.OPENAI_API_KEY)
+    anthropic = AnthropicProvider(api_key=settings.ANTHROPIC_API_KEY)
 
     # Verify model catalogues are defined and uncorrupted
     assert len(gemini.get_supported_models()) >= 2

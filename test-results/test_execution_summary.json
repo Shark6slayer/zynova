@@ -1,0 +1,26 @@
+{
+  "timestamp": "2026-11-07T03:07:08.032Z",
+  "suites": [
+    {
+      "name": "Frontend Playwright Smoke (Production Read-Only)",
+      "status": "PASSED",
+      "duration": "7.78s",
+      "tests": 10,
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "name": "Backend Pytest Suite (Core, Auth Lifecycle, E2E Lifecycle)",
+      "status": "PASSED",
+      "duration": "6.92s",
+      "tests": 23,
+      "passed": 23,
+      "failed": 0
+    }
+  ],
+  "totals": {
+    "passed": 33,
+    "failed": 0,
+    "skipped": 0
+  }
+}

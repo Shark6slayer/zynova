@@ -1,0 +1,72 @@
+[
+  {
+    "_id": {
+      "$oid": "6acf31d642b9f80d8624141b"
+    },
+    "email": "dbg@test.in",
+    "username": "dbg",
+    "full_name": "Dbg",
+    "hashed_password": "$argon2id$v=19$m=65536,t=3,p=4$hjDmvJdSqrVWKgWg9J4TQg$EljM7jxZ9Gjd8Voa/vd13gsR8AIdzcad23M3STv32sY",
+    "is_active": true,
+    "created_at": {
+      "$date": "2026-10-14T07:40:06.664Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-14T07:40:06.664Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad348cfe85efca281b40869"
+    },
+    "email": "owner1@superai.in",
+    "username": "rest_owner_1",
+    "full_name": "Karthik Chef",
+    "hashed_password": "$argon2id$v=19$m=65536,t=3,p=4$Pue8t7bWem8NwThH6P3fmw$XXWtxO2AZ706V4yZ5RXmHKRaYPCvEmr7sfjD1q5ENwc",
+    "is_active": true,
+    "created_at": {
+      "$date": "2026-10-17T10:07:11.331Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T10:07:11.331Z"
+    },
+    "roles": [
+      "restaurant_owner"
+    ]
+  },
+  {
+    "_id": {
+      "$oid": "6ad348cfe85efca281b4086c"
+    },
+    "email": "owner2@superai.in",
+    "username": "rest_owner_2",
+    "full_name": "Rival Chef",
+    "hashed_password": "$argon2id$v=19$m=65536,t=3,p=4$MCYEYGzNWctZy1lrbW1tDQ$08kNL7hvnllw7g9V6DFXv1VkiPgai1BNPGMSRi2t36U",
+    "is_active": true,
+    "created_at": {
+      "$date": "2026-10-17T10:07:11.474Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T10:07:11.474Z"
+    },
+    "roles": [
+      "restaurant_owner"
+    ]
+  },
+  {
+    "_id": {
+      "$oid": "6ad348cfe85efca281b40872"
+    },
+    "email": "foodbuyer@superai.in",
+    "username": "food_buyer_1",
+    "full_name": "Food Buyer",
+    "hashed_password": "$argon2id$v=19$m=65536,t=3,p=4$9Z6zdq4VohSCkNJaK6V0Lg$R44tn9YC4fWGjgEzh1QWUf6ambYq5cexUdjfA0KQsSU",
+    "is_active": true,
+    "created_at": {
+      "$date": "2026-10-17T10:07:11.679Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T10:07:11.679Z"
+    }
+  }
+]

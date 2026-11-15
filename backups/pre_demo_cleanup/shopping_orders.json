@@ -1,0 +1,254 @@
+[
+  {
+    "_id": {
+      "$oid": "6ad25da25e74e0655609028c"
+    },
+    "customer_id": "6ad25da25e74e06556090289",
+    "customer_name": "Buyer One",
+    "customer_email": "buyer1@superai.in",
+    "shipping_full_name": "Buyer One",
+    "shipping_phone": "+919876543210",
+    "shipping_address": "Flat 101, Indiranagar",
+    "shipping_city": "Bengaluru",
+    "shipping_postal_code": "560038",
+    "items": [
+      {
+        "product_id": "prod_seller_1792171426_6ad25da25e74e06556090287",
+        "name": "Handcrafted Brass Lamp",
+        "sku": "SKU-1792171426-6ad2",
+        "brand": "Karthik Crafts",
+        "unit_price_paise": 139900,
+        "quantity": 2,
+        "total_price_paise": 279800,
+        "image_url": "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=600",
+        "seller_id": "6ad25da25e74e06556090280"
+      }
+    ],
+    "total_items_count": 2,
+    "subtotal_paise": 279800,
+    "shipping_paise": 0,
+    "taxes_paise": 50364,
+    "discount_paise": 0,
+    "total_paise": 330164,
+    "payment_method": "cod",
+    "payment_status": "pending",
+    "order_status": "shipped",
+    "idempotency_key": null,
+    "created_at": {
+      "$date": "2026-10-16T17:23:46.457Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-16T17:23:46.509Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad2612e75858b8e733cd99e"
+    },
+    "customer_id": "6ad2612e75858b8e733cd99b",
+    "customer_name": "Buyer One",
+    "customer_email": "buyer1@superai.in",
+    "shipping_full_name": "Buyer One",
+    "shipping_phone": "+919876543210",
+    "shipping_address": "Flat 101, Indiranagar",
+    "shipping_city": "Bengaluru",
+    "shipping_postal_code": "560038",
+    "items": [
+      {
+        "product_id": "prod_seller_1792172334_6ad2612e75858b8e733cd999",
+        "name": "Handcrafted Brass Lamp",
+        "sku": "SKU-1792172334-6ad2",
+        "brand": "Karthik Crafts",
+        "unit_price_paise": 139900,
+        "quantity": 2,
+        "total_price_paise": 279800,
+        "image_url": "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=600",
+        "seller_id": "6ad2612e75858b8e733cd992"
+      }
+    ],
+    "total_items_count": 2,
+    "subtotal_paise": 279800,
+    "shipping_paise": 0,
+    "taxes_paise": 50364,
+    "discount_paise": 0,
+    "total_paise": 330164,
+    "payment_method": "cod",
+    "payment_status": "pending",
+    "order_status": "shipped",
+    "idempotency_key": null,
+    "created_at": {
+      "$date": "2026-10-16T17:38:54.666Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-16T17:38:54.711Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad261392ac50b483634d67a"
+    },
+    "customer_id": "6ad261392ac50b483634d677",
+    "customer_name": "Buyer One",
+    "customer_email": "buyer1@superai.in",
+    "shipping_full_name": "Buyer One",
+    "shipping_phone": "+919876543210",
+    "shipping_address": "Flat 101, Indiranagar",
+    "shipping_city": "Bengaluru",
+    "shipping_postal_code": "560038",
+    "items": [
+      {
+        "product_id": "prod_seller_1792172344_6ad261382ac50b483634d675",
+        "name": "Handcrafted Brass Lamp",
+        "sku": "SKU-1792172344-6ad2",
+        "brand": "Karthik Crafts",
+        "unit_price_paise": 139900,
+        "quantity": 2,
+        "total_price_paise": 279800,
+        "image_url": "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=600",
+        "seller_id": "6ad261382ac50b483634d66e"
+      }
+    ],
+    "total_items_count": 2,
+    "subtotal_paise": 279800,
+    "shipping_paise": 0,
+    "taxes_paise": 50364,
+    "discount_paise": 0,
+    "total_paise": 330164,
+    "payment_method": "cod",
+    "payment_status": "pending",
+    "order_status": "shipped",
+    "idempotency_key": null,
+    "created_at": {
+      "$date": "2026-10-16T17:39:05.137Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-16T17:39:05.182Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad32324574260f11b80b01b"
+    },
+    "customer_id": "6ad32324574260f11b80b018",
+    "customer_name": "Buyer One",
+    "customer_email": "buyer1@superai.in",
+    "shipping_full_name": "Buyer One",
+    "shipping_phone": "+919876543210",
+    "shipping_address": "Flat 101, Indiranagar",
+    "shipping_city": "Bengaluru",
+    "shipping_postal_code": "560038",
+    "items": [
+      {
+        "product_id": "prod_seller_1792221988_6ad32324574260f11b80b016",
+        "name": "Handcrafted Brass Lamp",
+        "sku": "SKU-1792221988-6ad3",
+        "brand": "Karthik Crafts",
+        "unit_price_paise": 139900,
+        "quantity": 2,
+        "total_price_paise": 279800,
+        "image_url": "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=600",
+        "seller_id": "6ad32323574260f11b80b00f"
+      }
+    ],
+    "total_items_count": 2,
+    "subtotal_paise": 279800,
+    "shipping_paise": 0,
+    "taxes_paise": 50364,
+    "discount_paise": 0,
+    "total_paise": 330164,
+    "payment_method": "cod",
+    "payment_status": "pending",
+    "order_status": "shipped",
+    "idempotency_key": null,
+    "created_at": {
+      "$date": "2026-10-17T07:26:28.344Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T07:26:28.381Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad326eb29aefca755e66c44"
+    },
+    "customer_id": "6ad326eb29aefca755e66c41",
+    "customer_name": "Buyer One",
+    "customer_email": "buyer1@superai.in",
+    "shipping_full_name": "Buyer One",
+    "shipping_phone": "+919876543210",
+    "shipping_address": "Flat 101, Indiranagar",
+    "shipping_city": "Bengaluru",
+    "shipping_postal_code": "560038",
+    "items": [
+      {
+        "product_id": "prod_seller_1792222954_6ad326ea29aefca755e66c3f",
+        "name": "Handcrafted Brass Lamp",
+        "sku": "SKU-1792222954-6ad3",
+        "brand": "Karthik Crafts",
+        "unit_price_paise": 139900,
+        "quantity": 2,
+        "total_price_paise": 279800,
+        "image_url": "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=600",
+        "seller_id": "6ad326ea29aefca755e66c38"
+      }
+    ],
+    "total_items_count": 2,
+    "subtotal_paise": 279800,
+    "shipping_paise": 0,
+    "taxes_paise": 50364,
+    "discount_paise": 0,
+    "total_paise": 330164,
+    "payment_method": "cod",
+    "payment_status": "pending",
+    "order_status": "shipped",
+    "idempotency_key": null,
+    "created_at": {
+      "$date": "2026-10-17T07:42:35.123Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T07:42:35.157Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad348d4e85efca281b408f3"
+    },
+    "customer_id": "6ad348d4e85efca281b408f0",
+    "customer_name": "Buyer One",
+    "customer_email": "buyer1@superai.in",
+    "shipping_full_name": "Buyer One",
+    "shipping_phone": "+919876543210",
+    "shipping_address": "Flat 101, Indiranagar",
+    "shipping_city": "Bengaluru",
+    "shipping_postal_code": "560038",
+    "items": [
+      {
+        "product_id": "prod_seller_1792231636_6ad348d4e85efca281b408ee",
+        "name": "Handcrafted Brass Lamp",
+        "sku": "SKU-1792231636-6ad3",
+        "brand": "Karthik Crafts",
+        "unit_price_paise": 139900,
+        "quantity": 2,
+        "total_price_paise": 279800,
+        "image_url": "https://images.unsplash.com/photo-1543269865-cbf427effbad?w=600",
+        "seller_id": "6ad348d4e85efca281b408e7"
+      }
+    ],
+    "total_items_count": 2,
+    "subtotal_paise": 279800,
+    "shipping_paise": 0,
+    "taxes_paise": 50364,
+    "discount_paise": 0,
+    "total_paise": 330164,
+    "payment_method": "cod",
+    "payment_status": "pending",
+    "order_status": "shipped",
+    "idempotency_key": null,
+    "created_at": {
+      "$date": "2026-10-17T10:07:16.502Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T10:07:16.541Z"
+    }
+  }
+]

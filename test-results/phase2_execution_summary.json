@@ -1,0 +1,48 @@
+{
+  "timestamp": "2026-11-07T03:07:30.043Z",
+  "phase": "Phase 2 Deep Automation",
+  "suites": [
+    {
+      "name": "Frontend Production Smoke",
+      "target": "https://zynova.intellidev.in",
+      "status": "PASSED",
+      "duration": "7.80s",
+      "tests": 10,
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "name": "Frontend Deep Route Navigation & Responsiveness",
+      "target": "https://zynova.intellidev.in",
+      "status": "PASSED",
+      "duration": "9.72s",
+      "tests": 10,
+      "passed": 10,
+      "failed": 0
+    },
+    {
+      "name": "Backend Core & Auth Lifecycle",
+      "target": "Local ASGI Test Harness",
+      "status": "PASSED",
+      "duration": "6.11s",
+      "tests": 23,
+      "passed": 23,
+      "failed": 0
+    },
+    {
+      "name": "Backend Domain States, Empty & Error Handling",
+      "target": "Local ASGI Test Harness",
+      "status": "PASSED",
+      "duration": "4.89s",
+      "tests": 5,
+      "passed": 5,
+      "failed": 0
+    }
+  ],
+  "totals": {
+    "passed": 48,
+    "failed": 0,
+    "skipped": 0,
+    "blocked": 0
+  }
+}

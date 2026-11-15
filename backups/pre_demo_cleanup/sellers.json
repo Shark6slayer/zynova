@@ -1,0 +1,44 @@
+[
+  {
+    "_id": {
+      "$oid": "6ad348d4e85efca281b408ed"
+    },
+    "user_id": "6ad348d4e85efca281b408e7",
+    "business_name": "Karthik Crafts",
+    "business_category": "Home & Living",
+    "contact_phone": "+919876543299",
+    "business_address": "88 Crafts Lane, Indiranagar",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "pincode": "560038",
+    "gstin_or_pan": "29ABCDE1234F1Z5",
+    "status": "approved",
+    "created_at": {
+      "$date": "2026-10-17T10:07:16.296Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T10:07:16.296Z"
+    }
+  },
+  {
+    "_id": {
+      "$oid": "6ad348d4e85efca281b408ef"
+    },
+    "user_id": "6ad348d4e85efca281b408ea",
+    "business_name": "Rival Traders",
+    "business_category": "Electronics",
+    "contact_phone": "+919876543277",
+    "business_address": "404 Tech Park",
+    "city": "Bengaluru",
+    "state": "Karnataka",
+    "pincode": "560100",
+    "gstin_or_pan": null,
+    "status": "approved",
+    "created_at": {
+      "$date": "2026-10-17T10:07:16.330Z"
+    },
+    "updated_at": {
+      "$date": "2026-10-17T10:07:16.330Z"
+    }
+  }
+]

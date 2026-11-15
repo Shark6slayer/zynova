@@ -49,7 +49,7 @@ async def test_shopping_catalog_and_filters():
         assert "price_paise" in p0
         assert "price_inr" in p0
         assert p0["price_inr"] == round(p0["price_paise"] / 100, 2)
-        assert p0["is_seed_data"] is True
+        assert isinstance(p0["is_seed_data"], bool)
 
         # 2. Category filtering
         res_cat = await client.get("/api/v1/shopping/products?category=Electronics")

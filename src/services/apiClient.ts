@@ -1,7 +1,10 @@
 import type { UserPreferences } from '../types';
 
-// Default production backend endpoint (Render)
-export const PRODUCTION_API_BASE_URL = 'https://zynova-backend-dgpe.onrender.com/api/v1';
+// Canonical production backend endpoint (Custom API Domain)
+export const PRODUCTION_API_BASE_URL = 'https://api.zenova.intellidev.in/api/v1';
+
+// Fallback production backend endpoint (Render direct)
+export const FALLBACK_RENDER_API_BASE_URL = 'https://zynova-backend-dgpe.onrender.com/api/v1';
 
 // Dynamic Mobile & Web Base URL Resolver
 export const getApiBaseUrl = (): string => {
@@ -1881,6 +1884,62 @@ class ApiClient {
     return this.request<BillDetailResponse>('/payments/billers/fetch', {
       method: 'POST',
       body: JSON.stringify(payload),
+    });
+  }
+
+  // --- Meta Instagram Graph API Contract Methods ---
+  async getInstagramAuthorizeUrl(platform: 'web' | 'android' | 'ios' = 'web'): Promise<{ url: string }> {
+    return this.request<{ url: string }>(`/instagram/authorize-url?platform=${platform}`);
+  }
+
+  async getInstagramStatus(): Promise<{
+    connected: boolean;
+    username: string | null;
+    status: 'active' | 'needs_reconnect' | 'not_connected';
+    last_synced_at: string | null;
+    media_count: number | null;
+  }> {
+    return this.request('/instagram/status');
+  }
+
+  async getInstagramMedia(after?: string): Promise<{
+    data: Array<{
+      id: string;
+      caption?: string | null;
+      media_type: string;
+      media_url?: string | null;
+      thumbnail_url?: string | null;
+      permalink?: string | null;
+      timestamp?: string | null;
+      already_imported: boolean;
+    }>;
+    paging: {
+      cursors: {
+        after: string | null;
+      };
+    };
+  }> {
+    const qs = after ? `?after=${encodeURIComponent(after)}` : '';
+    return this.request(`/instagram/media${qs}`);
+  }
+
+  async importInstagramMedia(media_ids: string[]): Promise<{
+    results: Array<{
+      id: string;
+      status: 'imported' | 'skipped' | 'failed';
+      post_id: string | null;
+      message: string | null;
+    }>;
+  }> {
+    return this.request('/instagram/import', {
+      method: 'POST',
+      body: JSON.stringify({ media_ids }),
+    });
+  }
+
+  async disconnectInstagram(): Promise<{ ok: boolean }> {
+    return this.request<{ ok: boolean }>('/instagram/disconnect', {
+      method: 'DELETE',
     });
   }
 }

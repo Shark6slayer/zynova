@@ -1,0 +1,44 @@
+[
+  {
+    "_id": "rest_01",
+    "name": "A2B - Adyar Ananda Bhavan",
+    "description": "Legendary South Indian vegetarian dining, fresh ghee dosas, traditional sweets and filter coffee.",
+    "service_area": "Indiranagar",
+    "address": "100ft Road, HAL 2nd Stage, Indiranagar, Bengaluru, Karnataka 560038",
+    "cuisine": "South Indian, Pure Veg",
+    "rating": 4.6,
+    "time_mins": 22,
+    "price_for_two_inr": 350,
+    "is_veg": true,
+    "image_url": "https://images.unsplash.com/photo-1610192244261-3f33de3f55e4?w=600&auto=format&fit=crop&q=80",
+    "is_open": true
+  },
+  {
+    "_id": "rest_02",
+    "name": "Meghana Foods",
+    "description": "Iconic spicy Andhra-style biryani, rich chicken starters and aromatic coastal curries.",
+    "service_area": "Indiranagar",
+    "address": "CMH Road, Indiranagar, Bengaluru, Karnataka 560038",
+    "cuisine": "Andhra, Biryani",
+    "rating": 4.8,
+    "time_mins": 30,
+    "price_for_two_inr": 650,
+    "is_veg": false,
+    "image_url": "https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=600&auto=format&fit=crop&q=80",
+    "is_open": true
+  },
+  {
+    "_id": "rest_03",
+    "name": "The Rameshwaram Cafe",
+    "description": "Bangalore's quintessential high-energy quick service eatery famed for Podi ghee dosas and idlis.",
+    "service_area": "Indiranagar",
+    "address": "12th Main Road, Indiranagar, Bengaluru, Karnataka 560038",
+    "cuisine": "Authentic South Indian",
+    "rating": 4.9,
+    "time_mins": 25,
+    "price_for_two_inr": 300,
+    "is_veg": true,
+    "image_url": "https://images.unsplash.com/photo-1589301760014-d929f3979dbc?w=600&auto=format&fit=crop&q=80",
+    "is_open": true
+  }
+]

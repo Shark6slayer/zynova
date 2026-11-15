@@ -78,6 +78,16 @@ async def setup_phase24_indexes(db) -> None:
             name="video_watch_history_user_recent_idx",
         )
 
+        # Instagram integration indexes
+        await db.instagram_connections.create_index("user_id", unique=True, name="ig_conn_user_unique")
+        await db.instagram_connections.create_index("ig_user_id", unique=True, name="ig_conn_ig_user_unique")
+        await db.posts.create_index(
+            [("author_id", 1), ("instagram_media_id", 1)],
+            unique=True,
+            sparse=True,
+            name="posts_unique_author_ig_media"
+        )
+
         logger.info("Phase 24.1 & Phase 12.2 supplemental indexes verified.")
     except Exception as exc:
         logger.error(f"Phase 24.1 index setup error: {exc}")

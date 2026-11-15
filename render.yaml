@@ -44,3 +44,17 @@ services:
         value: false
       - key: RATE_LIMIT_FAIL_CLOSED_IN_PROD
         value: false
+      - key: META_APP_ID
+        sync: false
+      - key: META_APP_SECRET
+        sync: false
+      - key: META_GRAPH_VERSION
+        value: v21.0
+      - key: INSTAGRAM_REDIRECT_URI
+        sync: false
+      - key: INSTAGRAM_WEBHOOK_VERIFY_TOKEN
+        sync: false
+      - key: WEB_APP_URL
+        value: https://www.intellidev.in
+      - key: MOBILE_DEEP_LINK_SCHEME
+        value: zenova

@@ -1,0 +1,58 @@
+{
+  "total": 10,
+  "passed": 10,
+  "failed": 0,
+  "skipped": 0,
+  "tests": [
+    {
+      "name": "1. Production homepage loads with HTTP 200/304",
+      "status": "PASSED",
+      "duration": 531
+    },
+    {
+      "name": "2. Page title and metadata render correctly",
+      "status": "PASSED",
+      "duration": 118
+    },
+    {
+      "name": "3. No uncaught JavaScript runtime errors occur during initial page load",
+      "status": "PASSED",
+      "duration": 2016
+    },
+    {
+      "name": "4. No unexpected failed same-origin or backend API requests occur on initial render",
+      "status": "PASSED",
+      "duration": 0
+    },
+    {
+      "name": "5. Primary layout (Sidebar / Unified sovereign navigation) renders",
+      "status": "PASSED",
+      "duration": 36
+    },
+    {
+      "name": "6. Climate widget renders valid data or respectful fallback without CSP errors",
+      "status": "PASSED",
+      "duration": 16
+    },
+    {
+      "name": "7. Manual city selection fallback dropdown opens and contains Indian metro cities",
+      "status": "PASSED",
+      "duration": 1614
+    },
+    {
+      "name": "8. Desktop screenshot captured successfully for regression verification",
+      "status": "PASSED",
+      "duration": 76
+    },
+    {
+      "name": "9. Mobile homepage loads and adapts to 375px mobile viewport",
+      "status": "PASSED",
+      "duration": 713
+    },
+    {
+      "name": "10. Mobile screenshot captured for responsiveness verification",
+      "status": "PASSED",
+      "duration": 73
+    }
+  ]
+}

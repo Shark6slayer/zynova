@@ -74,7 +74,7 @@ async def test_private_video_streaming_authorization():
         "mime_type": "video/mp4",
         "file_size_bytes": 1024,
         "visibility": "private",
-        "status": "ready"
+        "status": "published"
     })
 
     await db.users.insert_one({

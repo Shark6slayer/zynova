@@ -25,7 +25,9 @@ class Settings(BaseSettings):
     CORS_ORIGINS: List[str] = [
         "https://www.intellidev.in",
         "https://intellidev.in",
+        "https://zenova.intellidev.in",
         "https://zynova.intellidev.in",
+        "https://api.zenova.intellidev.in",
         "https://zynovaapp-git-deployment-atlas-vercel-karuppusamy2.vercel.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -96,5 +98,14 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_API_KEY: Optional[str] = None
     GOOGLE_SEARCH_CX: Optional[str] = None
     YOUTUBE_API_KEY: Optional[str] = None
+
+    # Meta / Instagram Graph API Integration (Instagram via Facebook Login)
+    META_APP_ID: Optional[str] = None
+    META_APP_SECRET: Optional[str] = None
+    META_GRAPH_VERSION: str = "v21.0"
+    INSTAGRAM_REDIRECT_URI: str = "https://api.zenova.intellidev.in/api/v1/instagram/callback"
+    INSTAGRAM_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
+    WEB_APP_URL: str = "https://www.intellidev.in"
+    MOBILE_DEEP_LINK_SCHEME: str = "zenova"
 
 settings = Settings()

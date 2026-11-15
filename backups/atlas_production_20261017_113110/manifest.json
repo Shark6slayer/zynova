@@ -1,0 +1,28 @@
+{
+  "timestamp_utc": "2026-10-17T11:31:10.985917+00:00",
+  "cluster_host": "zynovacluster.t53zapm.mongodb.net",
+  "database": "zynova_db",
+  "collections": {
+    "products": {
+      "count": 6,
+      "file": "products.json",
+      "verified": true
+    },
+    "restaurants": {
+      "count": 3,
+      "file": "restaurants.json",
+      "verified": true
+    },
+    "menu_items": {
+      "count": 7,
+      "file": "menu_items.json",
+      "verified": true
+    }
+  },
+  "protected_baseline": {
+    "users": 0,
+    "sellers": 0,
+    "food_orders": 0,
+    "shopping_orders": 0
+  }
+}

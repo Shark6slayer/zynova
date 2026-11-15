@@ -4,6 +4,7 @@ from typing import Optional, Dict, Any
 from datetime import datetime, timezone
 from app.core.security import decode_token
 from app.core.token_revocation import is_token_revoked
+from app.core.config import settings
 from app.database.client import get_database
 from bson import ObjectId
 

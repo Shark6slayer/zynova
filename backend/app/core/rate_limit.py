@@ -1,3 +1,4 @@
+import asyncio
 import time
 import hashlib
 import logging
@@ -17,8 +18,9 @@ except ImportError:
     aioredis = None
     HAS_REDIS = False
 
-# Redis client singleton
+# Redis client singleton (bound to its originating event loop)
 _redis_pool: Optional[Any] = None
+_redis_pool_loop: Optional[asyncio.AbstractEventLoop] = None
 
 def get_masked_redis_url(url: Optional[str]) -> str:
     """Masks credentials in Redis connection URL for safe logging."""
@@ -35,10 +37,31 @@ def get_masked_redis_url(url: Optional[str]) -> str:
         return "redis://***@masked"
 
 async def get_redis_client() -> Optional[Any]:
-    """Retrieves or initializes the async Redis client connection pool."""
-    global _redis_pool
+    """Retrieves or initializes the async Redis client connection pool for the current loop."""
+    global _redis_pool, _redis_pool_loop
     if not HAS_REDIS or not settings.REDIS_URL:
         return None
+
+    try:
+        current_loop = asyncio.get_running_loop()
+    except RuntimeError:
+        current_loop = None
+
+    if _redis_pool is not None and (
+        _redis_pool_loop is None
+        or _redis_pool_loop.is_closed()
+        or (current_loop is not None and _redis_pool_loop is not current_loop)
+    ):
+        try:
+            if hasattr(_redis_pool, "aclose"):
+                await _redis_pool.aclose()
+            else:
+                await _redis_pool.close()
+        except Exception:
+            pass
+        _redis_pool = None
+        _redis_pool_loop = None
+
     if _redis_pool is None:
         try:
             _redis_pool = aioredis.from_url(
@@ -47,6 +70,7 @@ async def get_redis_client() -> Optional[Any]:
                 socket_timeout=settings.REDIS_CONNECT_TIMEOUT_SECONDS,
                 decode_responses=True
             )
+            _redis_pool_loop = current_loop
             logger.info(f"Initialized shared Redis rate limiter connection: {get_masked_redis_url(settings.REDIS_URL)}")
         except Exception as e:
             logger.error(f"Failed to connect to Redis: {e}")
@@ -55,15 +79,19 @@ async def get_redis_client() -> Optional[Any]:
 
 async def close_redis_connection():
     """Closes Redis connection pool cleanly upon application shutdown."""
-    global _redis_pool
+    global _redis_pool, _redis_pool_loop
     if _redis_pool is not None:
         try:
-            await _redis_pool.close()
+            if hasattr(_redis_pool, "aclose"):
+                await _redis_pool.aclose()
+            else:
+                await _redis_pool.close()
             logger.info("Closed Redis rate limiter connection pool.")
         except Exception as e:
             logger.warning(f"Error closing Redis pool: {e}")
         finally:
             _redis_pool = None
+            _redis_pool_loop = None
 
 def get_client_ip(request: Request) -> str:
     """
@@ -241,6 +269,12 @@ def check_payment_rate_limit(user_id: str):
 
 def check_balance_enquiry_rate_limit(user_id: str):
     balance_enquiry_rate_limiter.check(user_id)
+
+# Instagram API Rate Limiters: 30 requests per minute per user/IP
+instagram_rate_limiter = SharedRateLimiter(namespace="instagram", requests_limit=30, window_seconds=60, is_sensitive=False)
+
+def check_instagram_rate_limit(key: str):
+    instagram_rate_limiter.check(key)
 
 
 async def get_rate_limiter_health() -> Dict[str, Any]:

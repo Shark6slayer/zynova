@@ -10,7 +10,7 @@
  */
 
 const mode = process.env.NODE_ENV || 'production';
-const DEFAULT_PRODUCTION_API = 'https://zynova-backend-dgpe.onrender.com/api/v1';
+const DEFAULT_PRODUCTION_API = 'https://api.zenova.intellidev.in/api/v1';
 const apiUrl = process.env.VITE_API_BASE_URL || DEFAULT_PRODUCTION_API;
 
 console.log(`[Zynova Build Check] Validating environment for mode: ${mode}...`);
