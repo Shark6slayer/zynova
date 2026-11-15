@@ -19,7 +19,8 @@ export type NavModuleId =
   | 'cloud'
   | 'customization'
   | 'notifications'
-  | 'settings';
+  | 'settings'
+  | 'connected-accounts';
 
 export interface UserPreferences {
   theme: ThemePreset;

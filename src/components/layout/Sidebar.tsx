@@ -5,6 +5,7 @@ import {
   ChevronLeft, ChevronRight, Sparkles, Sun, Moon, Laptop,
   X, User, ShieldCheck
 } from 'lucide-react';
+import { InstagramIcon } from '../icons/InstagramIcon';
 import { useApp } from '../../context/AppContext';
 import { useAuth } from '../../context/AuthContext';
 import type { NavModuleId, AppearanceMode } from '../../types';
@@ -30,6 +31,7 @@ export const NAV_ITEMS: NavItem[] = [
   { id: 'payments', label: 'Payments', labelKey: 'nav.payments', icon: CreditCard, category: 'lifestyle' },
   { id: 'notifications', label: 'Notifications', labelKey: 'nav.notifications', icon: Bell, category: 'system' },
   { id: 'settings', label: 'Settings', labelKey: 'nav.settings', icon: Settings, category: 'system' },
+  { id: 'connected-accounts', label: 'Connected Accounts', labelKey: 'nav.connected-accounts', icon: InstagramIcon, category: 'system' },
 ];
 
 interface SidebarProps {

@@ -27,6 +27,7 @@ const CloudDriveView = React.lazy(() => import('../../features/cloud/CloudDriveV
 const CustomizationStudioView = React.lazy(() => import('../../features/customization/CustomizationStudioView').then(m => ({ default: m.CustomizationStudioView })));
 const NotificationsCenterView = React.lazy(() => import('../../features/notifications/NotificationsCenterView').then(m => ({ default: m.NotificationsCenterView })));
 const SettingsAccountView = React.lazy(() => import('../../features/settings/SettingsAccountView').then(m => ({ default: m.SettingsAccountView })));
+const SettingsConnectionsView = React.lazy(() => import('../../features/settings/SettingsConnectionsView').then(m => ({ default: m.SettingsConnectionsView })));
 const PrivacyPolicyView = React.lazy(() => import('../../features/public/PrivacyPolicyView').then(m => ({ default: m.PrivacyPolicyView })));
 const TermsOfServiceView = React.lazy(() => import('../../features/public/TermsOfServiceView').then(m => ({ default: m.TermsOfServiceView })));
 const DataDeletionStatusView = React.lazy(() => import('../../features/public/DataDeletionStatusView').then(m => ({ default: m.DataDeletionStatusView })));
@@ -98,6 +99,8 @@ export const AppShell: React.FC = () => {
         return <NotificationsCenterView />;
       case 'settings':
         return <SettingsAccountView />;
+      case 'connected-accounts':
+        return <SettingsConnectionsView />;
       default:
         return <HomeDashboardView />;
     }

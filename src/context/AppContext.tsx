@@ -57,10 +57,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const [activeModule, setActiveModuleState] = useState<NavModuleId>(() => {
     if (typeof window !== 'undefined') {
+      const pathname = window.location.pathname;
+      if (pathname === '/settings/connections') {
+        return 'connected-accounts';
+      }
       const hash = window.location.hash.replace('#/', '').replace('#', '');
       const validModules: NavModuleId[] = [
         'home', 'ai-assistant', 'search', 'chat', 'social', 'video',
-        'shopping', 'food', 'payments', 'cloud', 'customization', 'notifications', 'settings'
+        'shopping', 'food', 'payments', 'cloud', 'customization', 'notifications', 'settings', 'connected-accounts'
       ];
       if (validModules.includes(hash as NavModuleId)) {
         return hash as NavModuleId;
@@ -72,9 +76,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const setActiveModule = useCallback((module: NavModuleId) => {
     setActiveModuleState(module);
     if (typeof window !== 'undefined') {
-      const targetHash = `#/${module}`;
-      if (window.location.hash !== targetHash) {
-        window.history.pushState({ module }, '', targetHash);
+      if (module === 'connected-accounts') {
+        if (window.location.pathname !== '/settings/connections') {
+          window.history.pushState({ module }, '', '/settings/connections');
+        }
+      } else {
+        const targetHash = `#/${module}`;
+        if (window.location.hash !== targetHash) {
+          window.history.pushState({ module }, '', targetHash);
+        }
       }
     }
   }, []);
@@ -83,10 +93,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   useEffect(() => {
     if (typeof window === 'undefined') return;
     const handlePopState = () => {
+      const pathname = window.location.pathname;
+      if (pathname === '/settings/connections') {
+        setActiveModuleState('connected-accounts');
+        return;
+      }
       const hash = window.location.hash.replace('#/', '').replace('#', '');
       const validModules: NavModuleId[] = [
         'home', 'ai-assistant', 'search', 'chat', 'social', 'video',
-        'shopping', 'food', 'payments', 'cloud', 'customization', 'notifications', 'settings'
+        'shopping', 'food', 'payments', 'cloud', 'customization', 'notifications', 'settings', 'connected-accounts'
       ];
       if (validModules.includes(hash as NavModuleId)) {
         setActiveModuleState(hash as NavModuleId);

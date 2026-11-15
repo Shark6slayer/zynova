@@ -31,6 +31,7 @@ const EN_CATALOG: TranslationDictionary = {
   'nav.customization': 'Studio',
   'nav.notifications': 'Notifications',
   'nav.settings': 'Settings',
+  'nav.connected-accounts': 'Connected Accounts',
   'nav.menu': 'Menu',
 
   // Common UI Actions & States
