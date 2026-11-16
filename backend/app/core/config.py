@@ -1,5 +1,10 @@
 from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import field_validator
 from typing import List, Optional
+import logging
+from urllib.parse import urlparse
+
+logger = logging.getLogger("super_ai.config")
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
@@ -105,10 +110,41 @@ class Settings(BaseSettings):
     # Meta / Instagram Graph API Integration (Instagram via Facebook Login)
     META_APP_ID: Optional[str] = None
     META_APP_SECRET: Optional[str] = None
+    META_LOGIN_CONFIG_ID: Optional[str] = None
     META_GRAPH_VERSION: str = "v21.0"
     INSTAGRAM_REDIRECT_URI: str = "https://api.zenova.intellidev.in/api/v1/instagram/callback"
     INSTAGRAM_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
     WEB_APP_URL: str = "https://www.intellidev.in"
     MOBILE_DEEP_LINK_SCHEME: str = "zenova"
+
+    @field_validator("INSTAGRAM_REDIRECT_URI", mode="after")
+    @classmethod
+    def validate_instagram_redirect_uri(cls, v: str) -> str:
+        """
+        Validates that INSTAGRAM_REDIRECT_URI is a plain HTTPS callback URL:
+        - Must start with https://
+        - Must NOT have query string (?...) or fragment (#...)
+        - Path must end with /instagram/callback
+        """
+        if not v:
+            return v
+        try:
+            parsed = urlparse(v)
+            is_valid = (
+                parsed.scheme == "https"
+                and bool(parsed.netloc)
+                and not parsed.query
+                and not parsed.fragment
+                and parsed.path.rstrip("/").endswith("/instagram/callback")
+            )
+            if not is_valid:
+                logger.warning(
+                    "INSTAGRAM_REDIRECT_URI is invalid: must be a plain https URL without query string or fragment, ending with /instagram/callback. Setting will be marked unconfigured."
+                )
+                return ""
+        except Exception:
+            logger.warning("Failed to parse INSTAGRAM_REDIRECT_URI. Setting will be marked unconfigured.")
+            return ""
+        return v
 
 settings = Settings()

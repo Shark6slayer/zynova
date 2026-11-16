@@ -5,11 +5,54 @@ from app.core.config import settings
 from app.database.client import connect_to_database, close_database_connection, get_database
 from app.api.router import api_router
 import logging
+import re
 
+# Redact sensitive parameters from all logs (tokens, codes, secrets)
+SECRET_PATTERNS = [
+    re.compile(r"(client_secret=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(code=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(access_token=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(fb_exchange_token=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(refresh_token=)[^&\s]+", re.IGNORECASE),
+]
+
+class SensitiveDataRedactionFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        if isinstance(record.msg, str):
+            for pat in SECRET_PATTERNS:
+                record.msg = pat.sub(r"\1[REDACTED]", record.msg)
+        if record.args:
+            if isinstance(record.args, dict):
+                redacted_args = {}
+                for k, v in record.args.items():
+                    if isinstance(v, str):
+                        for pat in SECRET_PATTERNS:
+                            v = pat.sub(r"\1[REDACTED]", v)
+                    redacted_args[k] = v
+                record.args = redacted_args
+            elif isinstance(record.args, tuple):
+                redacted_list = []
+                for v in record.args:
+                    if isinstance(v, str):
+                        for pat in SECRET_PATTERNS:
+                            v = pat.sub(r"\1[REDACTED]", v)
+                    redacted_list.append(v)
+                record.args = tuple(redacted_list)
+        return True
+
+# Configure root logger with redaction filter
+redaction_filter = SensitiveDataRedactionFilter()
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 )
+for handler in logging.root.handlers:
+    handler.addFilter(redaction_filter)
+
+# Suppress httpx and httpcore verbose request URL logs
+logging.getLogger("httpx").setLevel(logging.WARNING)
+logging.getLogger("httpcore").setLevel(logging.WARNING)
+
 logger = logging.getLogger("super_ai_app")
 
 from starlette.middleware.base import BaseHTTPMiddleware
