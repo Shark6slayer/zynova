@@ -59,19 +59,30 @@ export const AppShell: React.FC = () => {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isMobileNavOpen, setIsMobileNavOpen]);
 
-  const renderActiveModule = () => {
-    // Check path for public standalone pages without login
-    const pathname = window.location.pathname;
-    if (pathname === '/privacy-policy' || pathname === '/privacy') {
-      return <PrivacyPolicyView />;
-    }
-    if (pathname === '/terms' || pathname === '/terms-of-service') {
-      return <TermsOfServiceView />;
-    }
-    if (pathname === '/data-deletion') {
-      return <DataDeletionStatusView />;
-    }
+  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
+  const isPublicStandalone = 
+    pathname === '/privacy-policy' || 
+    pathname === '/privacy' || 
+    pathname === '/terms' || 
+    pathname === '/terms-of-service' || 
+    pathname === '/data-deletion';
 
+  if (isPublicStandalone) {
+    return (
+      <React.Suspense fallback={
+        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white space-y-3">
+          <div className="w-8 h-8 border-3 border-purple-500 border-t-transparent rounded-full animate-spin" />
+          <span className="text-xs text-slate-400 font-mono tracking-wider">Loading...</span>
+        </div>
+      }>
+        {(pathname === '/privacy-policy' || pathname === '/privacy') && <PrivacyPolicyView />}
+        {(pathname === '/terms' || pathname === '/terms-of-service') && <TermsOfServiceView />}
+        {pathname === '/data-deletion' && <DataDeletionStatusView />}
+      </React.Suspense>
+    );
+  }
+
+  const renderActiveModule = () => {
     switch (activeModule) {
       case 'home':
         return <HomeDashboardView />;
