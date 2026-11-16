@@ -14,6 +14,7 @@ SECRET_PATTERNS = [
     re.compile(r"(access_token=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(fb_exchange_token=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(refresh_token=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(state=)[^&\s]+", re.IGNORECASE),
 ]
 
 class SensitiveDataRedactionFilter(logging.Filter):
@@ -48,6 +49,13 @@ logging.basicConfig(
 )
 for handler in logging.root.handlers:
     handler.addFilter(redaction_filter)
+
+# Apply redaction filter to uvicorn loggers specifically (including uvicorn.access)
+for uvicorn_logger_name in ("uvicorn", "uvicorn.access", "uvicorn.error"):
+    u_log = logging.getLogger(uvicorn_logger_name)
+    u_log.addFilter(redaction_filter)
+    for h in u_log.handlers:
+        h.addFilter(redaction_filter)
 
 # Suppress httpx and httpcore verbose request URL logs
 logging.getLogger("httpx").setLevel(logging.WARNING)

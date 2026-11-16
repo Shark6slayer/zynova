@@ -99,26 +99,29 @@ def test_sensitive_log_redaction():
 
 @pytest.mark.asyncio
 async def test_resolve_instagram_account_granular_scopes(monkeypatch):
-    """Path A: Success via debug_token granular_scopes"""
+    """Path A: Success via debug_token GET with granular_scopes"""
     monkeypatch.setattr(settings, "META_APP_ID", "123")
     monkeypatch.setattr(settings, "META_APP_SECRET", "sec")
 
     import httpx
 
     async def mock_post(self, url, **kwargs):
-        if "debug_token" in str(url):
+        return httpx.Response(404)
+
+    async def mock_get(self, url, **kwargs):
+        url_str = str(url)
+        if "debug_token" in url_str:
             return httpx.Response(200, json={
                 "data": {
+                    "type": "SYSTEM_USER",
+                    "is_valid": True,
                     "granular_scopes": [
                         {"scope": "instagram_basic", "target_ids": ["17841461272962386"]},
                         {"scope": "pages_show_list", "target_ids": ["page_111"]}
                     ]
                 }
             })
-        return httpx.Response(404)
-
-    async def mock_get(self, url, **kwargs):
-        if "17841461272962386" in str(url):
+        if "17841461272962386" in url_str:
             return httpx.Response(200, json={
                 "id": "17841461272962386",
                 "username": "shark_6slayer",
@@ -136,6 +139,66 @@ async def test_resolve_instagram_account_granular_scopes(monkeypatch):
     assert res["ig_username"] == "shark_6slayer"
     assert res["token_type"] == "user"
     assert res["access_token"] == "mock_user_token_123"
+
+
+@pytest.mark.asyncio
+async def test_resolve_debug_token_get_fail_post_success(monkeypatch):
+    """Step A: debug_token GET fails (e.g. 400), retry POST succeeds"""
+    monkeypatch.setattr(settings, "META_APP_ID", "123")
+    monkeypatch.setattr(settings, "META_APP_SECRET", "sec")
+
+    import httpx
+
+    async def mock_post(self, url, **kwargs):
+        if "debug_token" in str(url):
+            return httpx.Response(200, json={
+                "data": {
+                    "type": "USER",
+                    "is_valid": True,
+                    "granular_scopes": [
+                        {"scope": "instagram_basic", "target_ids": ["17841461272962386"]}
+                    ]
+                }
+            })
+        return httpx.Response(404)
+
+    async def mock_get(self, url, **kwargs):
+        url_str = str(url)
+        if "debug_token" in url_str:
+            return httpx.Response(400, json={"error": {"code": 100, "message": "Method not allowed"}})
+        if "17841461272962386" in url_str:
+            return httpx.Response(200, json={
+                "id": "17841461272962386",
+                "username": "shark_6slayer"
+            })
+        return httpx.Response(404)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    res = await MetaInstagramService.resolve_instagram_account("mock_user_token_123")
+    assert res["ig_user_id"] == "17841461272962386"
+    assert res["ig_username"] == "shark_6slayer"
+
+
+@pytest.mark.asyncio
+async def test_access_log_filter_redacts_code_and_state():
+    """Verify that SensitiveDataRedactionFilter redacts code and state query params in uvicorn log lines"""
+    filt = SensitiveDataRedactionFilter()
+    rec = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname="",
+        lineno=0,
+        msg='127.0.0.1:51234 - "GET /api/v1/instagram/callback?code=AQB_secret_code_999&state=super_secret_state_888 HTTP/1.1" 302',
+        args=(),
+        exc_info=None
+    )
+    filt.filter(rec)
+    assert "AQB_secret_code_999" not in rec.msg
+    assert "super_secret_state_888" not in rec.msg
+    assert "code=[REDACTED]" in rec.msg
+    assert "state=[REDACTED]" in rec.msg
 
 
 @pytest.mark.asyncio

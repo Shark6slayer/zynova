@@ -191,11 +191,11 @@ async def instagram_oauth_callback(
         # Step 1: Exchange code for short-lived user access token
         short_user_token = await MetaInstagramService.exchange_code_for_user_token(code)
 
-        # Step 2: Exchange for long-lived user access token (60 days)
-        long_user_token, expires_in = await MetaInstagramService.exchange_for_long_lived_user_token(short_user_token)
+        # Step 2: Exchange for long-lived user access token (60 days) or keep direct/system-user token
+        active_user_token, expires_in, token_kind = await MetaInstagramService.exchange_for_long_lived_user_token(short_user_token)
 
         # Step 3: Multi-path resolution (granular_scopes -> /me/accounts -> /me/businesses)
-        account_info = await MetaInstagramService.resolve_instagram_account(long_user_token)
+        account_info = await MetaInstagramService.resolve_instagram_account(active_user_token)
 
         page_id = account_info.get("page_id")
         token_to_store = account_info["access_token"]
