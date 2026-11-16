@@ -46,8 +46,9 @@ export const SettingsConnectionsView: React.FC = () => {
       case 'invalid_state':
       case 'state_invalid_or_expired':
         return 'Authorization session expired or was invalid. Please try connecting again.';
+      case 'no_instagram':
       case 'no_instagram_business_account_found':
-        return 'No Instagram Business or Creator account found on your Facebook Pages.';
+        return 'No Instagram Business or Creator account was found. Please ensure your Instagram account is set to Business or Creator, has been shared in the Meta authorization dialog (and linked to a Facebook Page if required by your Meta configuration), then click Connect Instagram to reconnect.';
       case 'redirect_mismatch':
         return 'Meta OAuth redirect URI mismatch. Please verify INSTAGRAM_REDIRECT_URI in backend environment and Meta App settings.';
       case 'code_used_or_expired':

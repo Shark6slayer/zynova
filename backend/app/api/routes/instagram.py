@@ -194,17 +194,18 @@ async def instagram_oauth_callback(
         # Step 2: Exchange for long-lived user access token (60 days)
         long_user_token, expires_in = await MetaInstagramService.exchange_for_long_lived_user_token(short_user_token)
 
-        # Step 3: Fetch connected Pages and find instagram_business_account
-        account_info = await MetaInstagramService.fetch_page_and_instagram_business_account(long_user_token)
+        # Step 3: Multi-path resolution (granular_scopes -> /me/accounts -> /me/businesses)
+        account_info = await MetaInstagramService.resolve_instagram_account(long_user_token)
 
-        page_id = account_info["page_id"]
-        page_token = account_info["page_access_token"]
+        page_id = account_info.get("page_id")
+        token_to_store = account_info["access_token"]
+        token_type = account_info.get("token_type", "user")
         ig_user_id = account_info["ig_user_id"]
         ig_username = account_info["ig_username"]
         media_count = account_info.get("media_count", 0)
 
-        # Step 4: Encrypt page access token with crypto_kms envelope encryption
-        access_token_enc = encrypt_field(page_token, context=f"ig_page_token:{user_id}")
+        # Step 4: Encrypt access token with crypto_kms envelope encryption
+        access_token_enc = encrypt_field(token_to_store, context=f"ig_token:{user_id}")
 
         now = datetime.now(timezone.utc)
         token_expires_at = now + timedelta(seconds=expires_in)
@@ -216,6 +217,7 @@ async def instagram_oauth_callback(
             "ig_username": ig_username,
             "page_id": page_id,
             "access_token_enc": access_token_enc,
+            "token_type": token_type,
             "token_expires_at": token_expires_at,
             "status": "active",
             "connected_at": now,
@@ -319,13 +321,18 @@ async def get_instagram_media(
     if not conn or not conn.get("access_token_enc"):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Instagram not connected")
 
-    # Decrypt Page token with crypto_kms
-    page_token = decrypt_field(conn["access_token_enc"], context=f"ig_page_token:{current_user['id']}")
+    # Decrypt stored token with crypto_kms (supports backward compatibility with ig_page_token context)
+    enc_token = conn["access_token_enc"]
+    try:
+        active_token = decrypt_field(enc_token, context=f"ig_token:{current_user['id']}")
+    except Exception:
+        active_token = decrypt_field(enc_token, context=f"ig_page_token:{current_user['id']}")
+
     ig_user_id = conn["ig_user_id"]
 
     raw_data = await MetaInstagramService.fetch_instagram_media(
         ig_user_id=ig_user_id,
-        page_token=page_token,
+        page_token=active_token,
         after=after,
         limit=25
     )
@@ -403,7 +410,13 @@ async def import_instagram_media(
     if not conn or not conn.get("access_token_enc"):
         raise HTTPException(status_code=400, detail="Instagram not connected")
 
-    page_token = decrypt_field(conn["access_token_enc"], context=f"ig_page_token:{current_user['id']}")
+    # Decrypt stored token with crypto_kms (supports backward compatibility with ig_page_token context)
+    enc_token = conn["access_token_enc"]
+    try:
+        active_token = decrypt_field(enc_token, context=f"ig_token:{current_user['id']}")
+    except Exception:
+        active_token = decrypt_field(enc_token, context=f"ig_page_token:{current_user['id']}")
+
     storage_adapter = get_storage_adapter()
     version = MetaInstagramService.get_version()
 
@@ -428,7 +441,7 @@ async def import_instagram_media(
                 meta_url,
                 params={
                     "fields": "id,caption,media_type,media_url,thumbnail_url,permalink,timestamp,children{media_url,media_type}",
-                    "access_token": page_token
+                    "access_token": active_token
                 }
             )
 
@@ -604,8 +617,14 @@ async def refresh_instagram_token(current_user: dict = Depends(get_current_user)
     if not conn:
         raise HTTPException(status_code=404, detail="Instagram connection not found")
 
-    page_token = decrypt_field(conn["access_token_enc"], context=f"ig_page_token:{current_user['id']}")
-    inspection = await MetaInstagramService.inspect_token(page_token)
+    # Decrypt stored token with crypto_kms (supports backward compatibility with ig_page_token context)
+    enc_token = conn["access_token_enc"]
+    try:
+        active_token = decrypt_field(enc_token, context=f"ig_token:{current_user['id']}")
+    except Exception:
+        active_token = decrypt_field(enc_token, context=f"ig_page_token:{current_user['id']}")
+
+    inspection = await MetaInstagramService.inspect_token(active_token)
 
     if not inspection.get("is_valid", False):
         await db.instagram_connections.update_one(

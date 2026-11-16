@@ -95,3 +95,143 @@ def test_sensitive_log_redaction():
     assert "client_secret=[REDACTED]" in rec.msg
     assert "code=[REDACTED]" in rec.msg
     assert "access_token=[REDACTED]" in rec.msg
+
+
+@pytest.mark.asyncio
+async def test_resolve_instagram_account_granular_scopes(monkeypatch):
+    """Path A: Success via debug_token granular_scopes"""
+    monkeypatch.setattr(settings, "META_APP_ID", "123")
+    monkeypatch.setattr(settings, "META_APP_SECRET", "sec")
+
+    import httpx
+
+    async def mock_post(self, url, **kwargs):
+        if "debug_token" in str(url):
+            return httpx.Response(200, json={
+                "data": {
+                    "granular_scopes": [
+                        {"scope": "instagram_basic", "target_ids": ["17841461272962386"]},
+                        {"scope": "pages_show_list", "target_ids": ["page_111"]}
+                    ]
+                }
+            })
+        return httpx.Response(404)
+
+    async def mock_get(self, url, **kwargs):
+        if "17841461272962386" in str(url):
+            return httpx.Response(200, json={
+                "id": "17841461272962386",
+                "username": "shark_6slayer",
+                "profile_picture_url": "https://example.com/pic.jpg",
+                "followers_count": 100,
+                "media_count": 10
+            })
+        return httpx.Response(404)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    res = await MetaInstagramService.resolve_instagram_account("mock_user_token_123")
+    assert res["ig_user_id"] == "17841461272962386"
+    assert res["ig_username"] == "shark_6slayer"
+    assert res["token_type"] == "user"
+    assert res["access_token"] == "mock_user_token_123"
+
+
+@pytest.mark.asyncio
+async def test_resolve_instagram_account_me_accounts_fallback(monkeypatch):
+    """Path B: Success via /me/accounts fallback (classic page-linked)"""
+    monkeypatch.setattr(settings, "META_APP_ID", "123")
+    monkeypatch.setattr(settings, "META_APP_SECRET", "sec")
+
+    import httpx
+
+    async def mock_post(self, url, **kwargs):
+        # debug_token returns empty granular_scopes
+        if "debug_token" in str(url):
+            return httpx.Response(200, json={"data": {"granular_scopes": []}})
+        return httpx.Response(404)
+
+    async def mock_get(self, url, **kwargs):
+        url_str = str(url)
+        if "/me/accounts" in url_str:
+            return httpx.Response(200, json={
+                "data": [{
+                    "id": "page_999",
+                    "name": "My Page",
+                    "access_token": "page_token_abc",
+                    "instagram_business_account": {
+                        "id": "ig_888",
+                        "username": "page_ig_user"
+                    }
+                }]
+            })
+        if "ig_888" in url_str:
+            params = kwargs.get("params", {})
+            # Succeeds for page_token
+            if params.get("access_token") == "page_token_abc":
+                return httpx.Response(200, json={
+                    "id": "ig_888",
+                    "username": "page_ig_user",
+                    "media_count": 5
+                })
+        return httpx.Response(400)
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    res = await MetaInstagramService.resolve_instagram_account("mock_user_token_123")
+    assert res["ig_user_id"] == "ig_888"
+    assert res["ig_username"] == "page_ig_user"
+    assert res["token_type"] == "page"
+    assert res["access_token"] == "page_token_abc"
+    assert res["page_id"] == "page_999"
+
+
+@pytest.mark.asyncio
+async def test_resolve_instagram_account_nothing_found(monkeypatch):
+    """Path failure: No accounts found across any path raises ValueError('no_instagram')"""
+    monkeypatch.setattr(settings, "META_APP_ID", "123")
+    monkeypatch.setattr(settings, "META_APP_SECRET", "sec")
+
+    import httpx
+
+    async def mock_post(self, url, **kwargs):
+        return httpx.Response(200, json={"data": {"granular_scopes": []}})
+
+    async def mock_get(self, url, **kwargs):
+        return httpx.Response(200, json={"data": []})
+
+    monkeypatch.setattr(httpx.AsyncClient, "post", mock_post)
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    with pytest.raises(ValueError) as exc_info:
+        await MetaInstagramService.resolve_instagram_account("mock_user_token_123")
+    assert "no_instagram" in str(exc_info.value)
+
+
+@pytest.mark.asyncio
+async def test_fetch_media_uses_stored_token_correctly(monkeypatch):
+    """Verifies fetch_instagram_media uses the passed token (user or page) in request headers/params"""
+    import httpx
+
+    captured_params = {}
+
+    async def mock_get(self, url, **kwargs):
+        nonlocal captured_params
+        captured_params = kwargs.get("params", {})
+        return httpx.Response(200, json={
+            "data": [{"id": "media_test_1", "media_type": "IMAGE", "caption": "Hello world"}],
+            "paging": {"cursors": {"after": "next_page"}}
+        })
+
+    monkeypatch.setattr(httpx.AsyncClient, "get", mock_get)
+
+    res = await MetaInstagramService.fetch_instagram_media(
+        ig_user_id="17841461272962386",
+        page_token="stored_user_token_abc"
+    )
+    assert len(res["data"]) == 1
+    assert captured_params.get("access_token") == "stored_user_token_abc"
+
+

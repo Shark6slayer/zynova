@@ -28,8 +28,13 @@ async def validate_and_refresh_instagram_connections():
     async for conn in cursor:
         user_id = conn["user_id"]
         try:
-            page_token = decrypt_field(conn["access_token_enc"], context=f"ig_page_token:{user_id}")
-            inspection = await MetaInstagramService.inspect_token(page_token)
+            enc_token = conn["access_token_enc"]
+            try:
+                active_token = decrypt_field(enc_token, context=f"ig_token:{user_id}")
+            except Exception:
+                active_token = decrypt_field(enc_token, context=f"ig_page_token:{user_id}")
+
+            inspection = await MetaInstagramService.inspect_token(active_token)
             if not inspection.get("is_valid", False):
                 logger.warning(f"Instagram token invalid for user {user_id}. Marking needs_reconnect.")
                 await db.instagram_connections.update_one(
