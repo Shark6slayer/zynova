@@ -28,6 +28,7 @@ class Settings(BaseSettings):
         "https://zenova.intellidev.in",
         "https://zynova.intellidev.in",
         "https://api.zenova.intellidev.in",
+        "https://zynovaapp.vercel.app",
         "https://zynovaapp-git-deployment-atlas-vercel-karuppusamy2.vercel.app",
         "http://localhost:5173",
         "http://127.0.0.1:5173",
@@ -36,6 +37,8 @@ class Settings(BaseSettings):
         "capacitor://localhost",
         "capacitor://"
     ]
+
+    CORS_ORIGIN_REGEX: Optional[str] = r"^https://zynova[a-z0-9-]*-karuppusamy2\.vercel\.app$"
 
     # Shared Rate Limiting & Redis
     REDIS_URL: Optional[str] = None

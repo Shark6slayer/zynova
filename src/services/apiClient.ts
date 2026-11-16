@@ -893,17 +893,42 @@ class ApiClient {
     }
 
     const currentBaseUrl = getApiBaseUrl();
+    const method = (options.method || 'GET').toUpperCase();
+    const isIdempotent = method === 'GET' || method === 'HEAD';
+    let activeBaseUrl = currentBaseUrl;
     let response: Response;
+
     try {
-      response = await fetch(`${currentBaseUrl}${endpoint}`, {
+      response = await fetch(`${activeBaseUrl}${endpoint}`, {
         ...options,
         headers,
       });
     } catch (networkErr: any) {
-      console.warn(`[Zynova Network Error] Failed to reach API at ${currentBaseUrl}${endpoint}:`, networkErr);
-      throw new Error(
-        `Unable to connect to server. Please check your internet connection or verify backend configuration. (${networkErr.message || 'NetworkError'})`
-      );
+      // Failover logic: On network-level fetch failure, retry ONCE against FALLBACK_RENDER_API_BASE_URL
+      // strictly for idempotent requests (GET, HEAD) and only if currentBaseUrl is not already the fallback.
+      if (isIdempotent && currentBaseUrl !== FALLBACK_RENDER_API_BASE_URL) {
+        console.warn(
+          `[Zynova Network Error] Primary API ${currentBaseUrl}${endpoint} failed. Attempting failover to Render direct...`,
+          networkErr
+        );
+        try {
+          activeBaseUrl = FALLBACK_RENDER_API_BASE_URL;
+          response = await fetch(`${activeBaseUrl}${endpoint}`, {
+            ...options,
+            headers,
+          });
+        } catch (failoverErr: any) {
+          console.warn(`[Zynova Network Error] Failover to ${activeBaseUrl}${endpoint} also failed:`, failoverErr);
+          throw new Error(
+            `Unable to connect to server. Please check your internet connection or verify backend configuration. (${failoverErr.message || 'NetworkError'})`
+          );
+        }
+      } else {
+        console.warn(`[Zynova Network Error] Failed to reach API at ${currentBaseUrl}${endpoint}:`, networkErr);
+        throw new Error(
+          `Unable to connect to server. Please check your internet connection or verify backend configuration. (${networkErr.message || 'NetworkError'})`
+        );
+      }
     }
 
     // If access token expired, try to refresh once automatically
@@ -912,7 +937,7 @@ class ApiClient {
         const refreshed = await this.refreshToken();
         if (refreshed) {
           headers['Authorization'] = `Bearer ${refreshed.access_token}`;
-          response = await fetch(`${currentBaseUrl}${endpoint}`, {
+          response = await fetch(`${activeBaseUrl}${endpoint}`, {
             ...options,
             headers,
           });
