@@ -176,3 +176,35 @@ async def test_zenolm_100m_p85_enhanced_inference(zenolm_provider):
     assert zenolm_provider._active_model_id == "zenolm-100m-p85"
     assert zenolm_provider._device.type == "cuda"
     assert next(zenolm_provider._model.parameters()).is_cuda is True
+
+
+@pytest.mark.asyncio
+async def test_zenolm_100m_p86_multilingual_inference(zenolm_provider):
+    """Verifies sovereign local streaming inference using the Phase 8.6 multilingual model on CUDA."""
+    if not os.path.exists("C:/zenoai/checkpoints/phase_8_6/zeno_lm_100m_p86_final.pt"):
+        pytest.skip("Phase 8.6 checkpoint not present")
+
+    messages = [
+        {"role": "user", "content": "வணக்கம் ZenoAI! Explain photosynthesis."}
+    ]
+    chunks = []
+    usages = []
+
+    async for item in zenolm_provider.stream_chat(
+        messages=messages,
+        model="zenolm-100m-p86",
+        temperature=0.0,
+        max_tokens=16
+    ):
+        if item.get("type") == "chunk":
+            chunks.append(item.get("text", ""))
+        elif item.get("type") == "token_usage":
+            usages.append(item)
+
+    assert len(chunks) > 0
+    assert len(usages) >= 2
+    assert usages[0]["tokens_in"] > 0
+    assert usages[-1]["tokens_out"] > 0
+    assert zenolm_provider._active_model_id == "zenolm-100m-p86"
+    assert zenolm_provider._device.type == "cuda"
+    assert next(zenolm_provider._model.parameters()).is_cuda is True
