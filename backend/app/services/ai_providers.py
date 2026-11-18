@@ -611,6 +611,15 @@ class ZenoLMProvider(BaseAIProvider):
         self._initialized = False
         self._init_error = None
 
+    @property
+    def device(self):
+        if self._device is not None:
+            return self._device
+        import torch
+        if torch.cuda.is_available():
+            return torch.device("cuda:0")
+        return torch.device("cpu")
+
     def _ensure_loaded(self):
         if self._initialized:
             return
@@ -625,14 +634,23 @@ class ZenoLMProvider(BaseAIProvider):
             from zeno_lm.config import ZenoLMConfig
             from zeno_lm.torch_model import ZenoLMModel
             from zeno_lm.tokenizer.bpe_tokenizer import ZenoTokenizer
+            from zeno_lm.device_manager import DeviceManager, GPUUnavailableError
 
-            dev = torch.device(self._device if self._device else ("cuda:0" if torch.cuda.is_available() else "cpu"))
+            allow_cpu = getattr(settings, "AI_ALLOW_CPU_FALLBACK", False)
+            dm = DeviceManager.get_instance(allow_cpu_fallback=allow_cpu)
+            dev = torch.device(self._device) if self._device else dm.get_device(0)
+
             ckpt = torch.load(self.checkpoint_path, map_location=dev)
             cfg_dict = ckpt["config"]
             config = ZenoLMConfig(**cfg_dict)
             model = ZenoLMModel(config).to(dev)
             model.load_state_dict(ckpt["model_state_dict"])
             model.eval()
+
+            # Verify parameter placement under GPU-first policy
+            placement_audit = dm.verify_model_placement(model, expected_device_type=dev.type)
+            if not placement_audit["is_verified"] and not allow_cpu:
+                raise RuntimeError(f"GPU placement validation failed: {placement_audit['mismatched_tensors']}")
 
             tokenizer = ZenoTokenizer.load_vocabulary(self.vocab_path)
             self._model = model
@@ -643,6 +661,14 @@ class ZenoLMProvider(BaseAIProvider):
         except Exception as e:
             logger.error(f"Failed to load ZenoLM model: {e}")
             self._init_error = str(e)
+            from zeno_lm.device_manager import GPUUnavailableError
+            if isinstance(e, GPUUnavailableError):
+                raise AIProviderException(
+                    code=AIErrorCode.GPU_UNAVAILABLE,
+                    message=str(e),
+                    provider_id=self.provider_id,
+                    status_code=503
+                )
 
     def is_configured(self) -> bool:
         return os.path.exists(self.checkpoint_path) and os.path.exists(self.vocab_path)
@@ -670,9 +696,11 @@ class ZenoLMProvider(BaseAIProvider):
     ) -> AsyncGenerator[Dict[str, Any], None]:
         self._ensure_loaded()
         if not self._initialized or self._model is None:
+            err_msg = str(self._init_error)
+            code = AIErrorCode.GPU_UNAVAILABLE if ("GPU" in err_msg or "CUDA" in err_msg) else AIErrorCode.MODEL_UNAVAILABLE
             raise AIProviderException(
-                code=AIErrorCode.MODEL_UNAVAILABLE,
-                message=f"ZenoLM sovereign model unavailable: {self._init_error}",
+                code=code,
+                message=f"ZenoLM sovereign model unavailable: {err_msg}",
                 provider_id=self.provider_id,
                 model=model,
                 status_code=503

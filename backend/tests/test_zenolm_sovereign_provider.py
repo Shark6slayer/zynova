@@ -78,3 +78,37 @@ async def test_zenolm_stream_chat_local_inference(zenolm_provider):
     assert usages[0]["tokens_in"] > 0
     assert usages[-1]["tokens_out"] > 0
     print(f"\n[ZenoLM Streaming Output]: {full_output}")
+
+
+def test_zenolm_provider_gpu_placement(zenolm_provider):
+    """Verifies that ZenoLMProvider places model strictly on CUDA under GPU-first policy."""
+    import torch
+    if torch.cuda.is_available():
+        assert zenolm_provider.device.type == "cuda"
+        zenolm_provider._ensure_loaded()
+        assert zenolm_provider._device.type == "cuda"
+        for p in zenolm_provider._model.parameters():
+            assert p.is_cuda is True
+
+
+@pytest.mark.asyncio
+async def test_zenolm_provider_rejects_cpu_fallback_by_default(monkeypatch):
+    """Verifies that ZenoLMProvider refuses silent CPU fallback when GPU is disabled."""
+    import torch
+    from app.core.ai_errors import AIProviderException, AIErrorCode
+    from zeno_lm.device_manager import DeviceManager, GPUUnavailableError
+
+    # Force CUDA unavailable
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: False)
+    DeviceManager.reset_instance()
+
+    provider = ZenoLMProvider()
+    with pytest.raises((AIProviderException, GPUUnavailableError)) as exc_info:
+        provider._ensure_loaded()
+
+    # Must raise AIProviderException with GPU_UNAVAILABLE or GPUUnavailableError
+    err_str = str(exc_info.value)
+    assert "GPU" in err_str or "CUDA" in err_str or "GPU_UNAVAILABLE" in err_str
+
+    # Reset DeviceManager
+    DeviceManager.reset_instance()

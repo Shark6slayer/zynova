@@ -65,6 +65,8 @@ class Settings(BaseSettings):
 
     # Production AI Core Engine (Phase 23 & Phase 23.1 Hardening & Phase 8.2 Sovereign Engine)
     SOVEREIGN_AI_MODE: bool = True  # Enforces local proprietary ZenoLM inference
+    GPU_FIRST_ENFORCED: bool = True  # Permanent GPU-first execution policy: CUDA mandatory
+    AI_ALLOW_CPU_FALLBACK: bool = False  # Refuses silent fallback to CPU unless explicitly configured
     AI_MOCK_MODE: bool = False  # Production safety: mock provider disabled by default
     AI_DEFAULT_PROVIDER: str = "zenolm"  # zenolm (sovereign), gemini, openai, anthropic, mock
     AI_DEFAULT_MODEL: str = "zenolm-micro-2m"
