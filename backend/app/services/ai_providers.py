@@ -623,11 +623,15 @@ class ZenoLMProvider(BaseAIProvider):
     def _ensure_loaded(self, model_id: Optional[str] = None):
         target_ckpt = self.checkpoint_path
         target_vocab = self.vocab_path
-        if model_id in ["zenolm-100m", "zenolm-100m-p85", "zenolm-100m-p86"]:
-            if model_id == "zenolm-100m-p86" and os.path.exists("C:/zenoai/checkpoints/phase_8_6/zeno_lm_100m_p86_final.pt"):
+        if model_id in ["zenolm-100m", "zenolm-100m-p85", "zenolm-100m-p86", "zenolm-100m-p87"]:
+            if model_id == "zenolm-100m-p87" and os.path.exists("C:/zenoai/checkpoints/phase_8_7/zeno_lm_100m_p87_final.pt"):
+                target_ckpt = "C:/zenoai/checkpoints/phase_8_7/zeno_lm_100m_p87_final.pt"
+            elif model_id == "zenolm-100m-p86" and os.path.exists("C:/zenoai/checkpoints/phase_8_6/zeno_lm_100m_p86_final.pt"):
                 target_ckpt = "C:/zenoai/checkpoints/phase_8_6/zeno_lm_100m_p86_final.pt"
             elif model_id == "zenolm-100m-p85" and os.path.exists("C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"):
                 target_ckpt = "C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"
+            elif os.path.exists("C:/zenoai/checkpoints/phase_8_7/zeno_lm_100m_p87_final.pt"):
+                target_ckpt = "C:/zenoai/checkpoints/phase_8_7/zeno_lm_100m_p87_final.pt"
             elif os.path.exists("C:/zenoai/checkpoints/phase_8_6/zeno_lm_100m_p86_final.pt"):
                 target_ckpt = "C:/zenoai/checkpoints/phase_8_6/zeno_lm_100m_p86_final.pt"
             elif os.path.exists("C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"):
@@ -726,6 +730,16 @@ class ZenoLMProvider(BaseAIProvider):
             models.append({
                 "id": "zenolm-100m-p86",
                 "name": "ZenoLM 100M Phase 8.6 Intelligence & Multilingual (Sovereign Local)",
+                "context_window": 4096,
+                "cost_per_1k_input_paise": 0,
+                "cost_per_1k_output_paise": 0,
+                "indic_support": True,
+                "is_sovereign": True
+            })
+        if os.path.exists("C:/zenoai/checkpoints/phase_8_7/zeno_lm_100m_p87_final.pt"):
+            models.append({
+                "id": "zenolm-100m-p87",
+                "name": "ZenoLM 100M Phase 8.7 Reasoning & Agent Aligned (Sovereign Local)",
                 "context_window": 4096,
                 "cost_per_1k_input_paise": 0,
                 "cost_per_1k_output_paise": 0,
