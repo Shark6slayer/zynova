@@ -14,6 +14,7 @@ try:
 except Exception as e:
     AndroidBridgeAdapter = None
 
+from app.core.config import settings
 from app.api.deps import get_current_user
 from app.services.ai_engine_service import ai_engine_service
 from app.core.ai_errors import AIErrorCode, AIProviderException
@@ -25,7 +26,7 @@ router = APIRouter(prefix="/ai", tags=["ai"])
 class AIChatRequest(BaseModel):
     conversation_id: Optional[str] = None
     prompt: str = Field(..., min_length=1, max_length=10000, description="User input message")
-    provider: Optional[str] = Field("gemini", description="Requested provider: gemini, openai, anthropic, mock")
+    provider: Optional[str] = Field(None, description="Requested provider: zenolm (sovereign default), gemini, openai, anthropic, mock")
     model: Optional[str] = Field(None, description="Specific model ID")
     temperature: Optional[float] = Field(0.7, ge=0.0, le=2.0)
     locale: Optional[str] = Field("en", description="Target Indic language code")
@@ -121,7 +122,7 @@ async def stream_chat(
     user_name = current_user.get("full_name") or current_user.get("username", "User")
 
     # 1. Resolve provider and validate configuration upfront
-    provider_id = req.provider or "gemini"
+    provider_id = req.provider or getattr(settings, "AI_DEFAULT_PROVIDER", "zenolm")
     try:
         provider = ai_engine_service.get_provider(provider_id)
     except AIProviderException as e:

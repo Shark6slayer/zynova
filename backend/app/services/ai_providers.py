@@ -1,4 +1,5 @@
 import abc
+import os
 import json
 import logging
 from typing import AsyncGenerator, Dict, Any, List, Optional
@@ -584,3 +585,177 @@ class AnthropicProvider(BaseAIProvider):
                 status_code=503,
                 retryable=True
             )
+
+
+class ZenoLMProvider(BaseAIProvider):
+    """
+    Sovereign AI Provider executing ZenoLM foundation model locally via PyTorch CUDA.
+    Remediates FIND-04: Full independence from commercial 3rd-party inference APIs (Gemini, OpenAI, Anthropic).
+    """
+    provider_id = "zenolm"
+    display_name = "ZenoLM Sovereign Neural Engine (PyTorch Local)"
+
+    def __init__(
+        self,
+        checkpoint_path: Optional[str] = None,
+        vocab_path: Optional[str] = None,
+        timeout_seconds: float = 45.0,
+        device: Optional[str] = None
+    ):
+        super().__init__(api_key=None, timeout_seconds=timeout_seconds)
+        self.checkpoint_path = checkpoint_path or getattr(settings, "ZENOLM_CHECKPOINT_PATH", "C:/zenoai/checkpoints/zeno_lm_p8_2_torch_best.pt")
+        self.vocab_path = vocab_path or getattr(settings, "ZENOLM_VOCAB_PATH", "C:/zenoai/checkpoints/zeno_tokenizer_vocab.json")
+        self._model = None
+        self._tokenizer = None
+        self._device = device
+        self._initialized = False
+        self._init_error = None
+
+    def _ensure_loaded(self):
+        if self._initialized:
+            return
+        if not os.path.exists(self.checkpoint_path) or not os.path.exists(self.vocab_path):
+            self._init_error = f"Checkpoint ({self.checkpoint_path}) or Vocab ({self.vocab_path}) missing"
+            return
+        try:
+            import sys
+            if "C:\\zenoai" not in sys.path:
+                sys.path.insert(0, "C:\\zenoai")
+            import torch
+            from zeno_lm.config import ZenoLMConfig
+            from zeno_lm.torch_model import ZenoLMModel
+            from zeno_lm.tokenizer.bpe_tokenizer import ZenoTokenizer
+
+            dev = torch.device(self._device if self._device else ("cuda:0" if torch.cuda.is_available() else "cpu"))
+            ckpt = torch.load(self.checkpoint_path, map_location=dev)
+            cfg_dict = ckpt["config"]
+            config = ZenoLMConfig(**cfg_dict)
+            model = ZenoLMModel(config).to(dev)
+            model.load_state_dict(ckpt["model_state_dict"])
+            model.eval()
+
+            tokenizer = ZenoTokenizer.load_vocabulary(self.vocab_path)
+            self._model = model
+            self._tokenizer = tokenizer
+            self._device = dev
+            self._initialized = True
+            logger.info(f"ZenoLMProvider loaded model on {dev} from {self.checkpoint_path}")
+        except Exception as e:
+            logger.error(f"Failed to load ZenoLM model: {e}")
+            self._init_error = str(e)
+
+    def is_configured(self) -> bool:
+        return os.path.exists(self.checkpoint_path) and os.path.exists(self.vocab_path)
+
+    def get_supported_models(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "id": "zenolm-micro-2m",
+                "name": "ZenoLM Micro 2M (Sovereign Local)",
+                "context_window": 256,
+                "cost_per_1k_input_paise": 0,
+                "cost_per_1k_output_paise": 0,
+                "indic_support": True,
+                "is_sovereign": True
+            }
+        ]
+
+    async def stream_chat(
+        self,
+        messages: List[Dict[str, str]],
+        model: str,
+        temperature: float = 0.7,
+        max_tokens: int = 256,
+        system_instruction: Optional[str] = None
+    ) -> AsyncGenerator[Dict[str, Any], None]:
+        self._ensure_loaded()
+        if not self._initialized or self._model is None:
+            raise AIProviderException(
+                code=AIErrorCode.MODEL_UNAVAILABLE,
+                message=f"ZenoLM sovereign model unavailable: {self._init_error}",
+                provider_id=self.provider_id,
+                model=model,
+                status_code=503
+            )
+
+        # Assemble prompt with canonical special tokens
+        prompt_parts = []
+        if system_instruction:
+            prompt_parts.append(f"<|start_system|> {system_instruction} <|end_system|>")
+        for m in messages:
+            role = m.get("role", "user")
+            content = m.get("content", "")
+            if role == "user":
+                prompt_parts.append(f"<|start_user|> {content} <|end_user|>")
+            elif role == "assistant":
+                prompt_parts.append(f"<|start_assistant|> {content} <|end_assistant|>")
+        prompt_parts.append("<|start_assistant|>")
+        prompt_text = " ".join(prompt_parts)
+
+        tokens = self._tokenizer.encode(prompt_text, add_special_tokens=True)
+        tokens_in = len(tokens)
+
+        yield {
+            "type": "token_usage",
+            "tokens_in": tokens_in,
+            "tokens_out": 0,
+            "is_estimated": False
+        }
+
+        # Autoregressive generation
+        import torch
+        import codecs
+        decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+        eos_id = self._tokenizer.special_token_to_id.get("<|end_of_text|>", 2)
+        assistant_end_id = self._tokenizer.special_token_to_id.get("<|end_assistant|>")
+
+        generated = list(tokens)
+        new_token_count = 0
+
+        with torch.no_grad():
+            for _ in range(max_tokens):
+                curr_input = torch.tensor([generated[-self._model.config.max_position_embeddings:]], dtype=torch.long, device=self._device)
+                logits = self._model(curr_input)
+                next_token_logits = logits[0, -1, :].clone()
+
+                # Repetition penalty
+                for prev_token in set(generated):
+                    if next_token_logits[prev_token] < 0:
+                        next_token_logits[prev_token] *= 1.15
+                    else:
+                        next_token_logits[prev_token] /= 1.15
+
+                if temperature <= 0.01:
+                    next_tok = torch.argmax(next_token_logits).item()
+                else:
+                    next_token_logits = next_token_logits / temperature
+                    probs = torch.softmax(next_token_logits, dim=-1)
+                    next_tok = torch.multinomial(probs, num_samples=1).item()
+
+                generated.append(next_tok)
+                new_token_count += 1
+
+                # Incremental UTF-8 decoding to prevent broken multi-byte characters
+                if next_tok in self._tokenizer.id_to_special_token:
+                    tok_text = self._tokenizer.id_to_special_token[next_tok]
+                    if tok_text not in ["<|end_of_text|>", "<|end_assistant|>", "<|pad|>"]:
+                        yield {"type": "chunk", "text": tok_text}
+                elif next_tok in self._tokenizer.id_to_vocab:
+                    raw_b = self._tokenizer.id_to_vocab[next_tok]
+                    tok_text = decoder.decode(raw_b, final=False)
+                    if tok_text:
+                        yield {"type": "chunk", "text": tok_text}
+
+                if next_tok == eos_id or (assistant_end_id is not None and next_tok == assistant_end_id):
+                    break
+
+        tail = decoder.decode(b"", final=True)
+        if tail:
+            yield {"type": "chunk", "text": tail}
+
+        yield {
+            "type": "token_usage",
+            "tokens_in": tokens_in,
+            "tokens_out": new_token_count,
+            "is_estimated": False
+        }

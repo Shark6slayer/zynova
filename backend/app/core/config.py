@@ -63,10 +63,13 @@ class Settings(BaseSettings):
     MASTER_ENCRYPTION_KEY: Optional[str] = "dev_master_key_super_ai_indic_sovereign_32bytes_sec"
     ACTIVE_KEY_VERSION: str = "v1"
 
-    # Production AI Core Engine (Phase 23 & Phase 23.1 Hardening)
+    # Production AI Core Engine (Phase 23 & Phase 23.1 Hardening & Phase 8.2 Sovereign Engine)
+    SOVEREIGN_AI_MODE: bool = True  # Enforces local proprietary ZenoLM inference
     AI_MOCK_MODE: bool = False  # Production safety: mock provider disabled by default
-    AI_DEFAULT_PROVIDER: str = "gemini"  # gemini, openai, anthropic, mock
-    AI_DEFAULT_MODEL: str = "gemini-2.5-flash"
+    AI_DEFAULT_PROVIDER: str = "zenolm"  # zenolm (sovereign), gemini, openai, anthropic, mock
+    AI_DEFAULT_MODEL: str = "zenolm-micro-2m"
+    ZENOLM_CHECKPOINT_PATH: str = "C:/zenoai/checkpoints/zeno_lm_p8_2_torch_best.pt"
+    ZENOLM_VOCAB_PATH: str = "C:/zenoai/checkpoints/zeno_tokenizer_vocab.json"
     GEMINI_API_KEY: Optional[str] = None
     OPENAI_API_KEY: Optional[str] = None
     ANTHROPIC_API_KEY: Optional[str] = None

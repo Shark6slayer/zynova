@@ -11,6 +11,7 @@ from app.services.ai_providers import (
     GeminiProvider,
     OpenAIProvider,
     AnthropicProvider,
+    ZenoLMProvider,
 )
 from app.database.client import get_database
 
@@ -20,6 +21,7 @@ class AIEngineService:
     """
     Central orchestration service for Zynova AI Core Engine (Hardened).
     Enforces:
+    - Sovereign-first model orchestration: defaults to local ZenoLM neural engine.
     - No automatic mock fallback in production: provider failures raise explicit normalized exceptions.
     - Token tracking and cost accounting in Mongo.
     - Owner-isolated conversation persistence.
@@ -28,6 +30,7 @@ class AIEngineService:
 
     def __init__(self):
         self.providers: Dict[str, BaseAIProvider] = {
+            "zenolm": ZenoLMProvider(timeout_seconds=settings.AI_INFERENCE_TIMEOUT_SECONDS),
             "mock": MockAIProvider(timeout_seconds=settings.AI_INFERENCE_TIMEOUT_SECONDS),
             "gemini": GeminiProvider(api_key=settings.GEMINI_API_KEY, timeout_seconds=settings.AI_INFERENCE_TIMEOUT_SECONDS),
             "openai": OpenAIProvider(api_key=settings.OPENAI_API_KEY, timeout_seconds=settings.AI_INFERENCE_TIMEOUT_SECONDS),
