@@ -623,8 +623,11 @@ class ZenoLMProvider(BaseAIProvider):
     def _ensure_loaded(self, model_id: Optional[str] = None):
         target_ckpt = self.checkpoint_path
         target_vocab = self.vocab_path
-        if model_id == "zenolm-100m" and os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt"):
-            target_ckpt = "C:/zenoai/checkpoints/zeno_lm_100m.pt"
+        if model_id in ["zenolm-100m", "zenolm-100m-p85"]:
+            if os.path.exists("C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"):
+                target_ckpt = "C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"
+            elif os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt"):
+                target_ckpt = "C:/zenoai/checkpoints/zeno_lm_100m.pt"
             target_vocab = "C:/zenoai/checkpoints/zeno_tokenizer_vocab_4k.json"
 
         req_model_id = model_id or "zenolm-micro-2m"
@@ -693,11 +696,21 @@ class ZenoLMProvider(BaseAIProvider):
                 "is_sovereign": True
             }
         ]
-        if os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt"):
+        if os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt") or os.path.exists("C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"):
             models.append({
                 "id": "zenolm-100m",
                 "name": "ZenoLM 100M Foundation (Sovereign Local)",
                 "context_window": 1024,
+                "cost_per_1k_input_paise": 0,
+                "cost_per_1k_output_paise": 0,
+                "indic_support": True,
+                "is_sovereign": True
+            })
+        if os.path.exists("C:/zenoai/checkpoints/phase_8_5/zeno_lm_100m_p85_final.pt"):
+            models.append({
+                "id": "zenolm-100m-p85",
+                "name": "ZenoLM 100M Phase 8.5 Enhanced (Sovereign Local)",
+                "context_window": 2048,
                 "cost_per_1k_input_paise": 0,
                 "cost_per_1k_output_paise": 0,
                 "indic_support": True,
