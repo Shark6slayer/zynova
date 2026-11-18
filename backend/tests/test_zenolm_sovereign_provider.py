@@ -112,3 +112,35 @@ async def test_zenolm_provider_rejects_cpu_fallback_by_default(monkeypatch):
 
     # Reset DeviceManager
     DeviceManager.reset_instance()
+
+
+@pytest.mark.asyncio
+async def test_zenolm_100m_sovereign_inference(zenolm_provider):
+    """Verifies sovereign local streaming inference using the 100M foundation model on GPU."""
+    if not os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt"):
+        pytest.skip("100M checkpoint not present")
+
+    messages = [
+        {"role": "user", "content": "Hello ZenoLM 100M"}
+    ]
+    chunks = []
+    usages = []
+
+    async for item in zenolm_provider.stream_chat(
+        messages=messages,
+        model="zenolm-100m",
+        temperature=0.0,
+        max_tokens=16
+    ):
+        if item.get("type") == "chunk":
+            chunks.append(item.get("text", ""))
+        elif item.get("type") == "token_usage":
+            usages.append(item)
+
+    assert len(chunks) > 0
+    assert len(usages) >= 2
+    assert usages[0]["tokens_in"] > 0
+    assert usages[-1]["tokens_out"] > 0
+    assert zenolm_provider._active_model_id == "zenolm-100m"
+    assert zenolm_provider._device.type == "cuda"
+    assert next(zenolm_provider._model.parameters()).is_cuda is True

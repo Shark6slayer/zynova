@@ -620,11 +620,18 @@ class ZenoLMProvider(BaseAIProvider):
             return torch.device("cuda:0")
         return torch.device("cpu")
 
-    def _ensure_loaded(self):
-        if self._initialized:
+    def _ensure_loaded(self, model_id: Optional[str] = None):
+        target_ckpt = self.checkpoint_path
+        target_vocab = self.vocab_path
+        if model_id == "zenolm-100m" and os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt"):
+            target_ckpt = "C:/zenoai/checkpoints/zeno_lm_100m.pt"
+            target_vocab = "C:/zenoai/checkpoints/zeno_tokenizer_vocab_4k.json"
+
+        req_model_id = model_id or "zenolm-micro-2m"
+        if self._initialized and getattr(self, "_active_model_id", None) == req_model_id:
             return
-        if not os.path.exists(self.checkpoint_path) or not os.path.exists(self.vocab_path):
-            self._init_error = f"Checkpoint ({self.checkpoint_path}) or Vocab ({self.vocab_path}) missing"
+        if not os.path.exists(target_ckpt) or not os.path.exists(target_vocab):
+            self._init_error = f"Checkpoint ({target_ckpt}) or Vocab ({target_vocab}) missing"
             return
         try:
             import sys
@@ -640,7 +647,7 @@ class ZenoLMProvider(BaseAIProvider):
             dm = DeviceManager.get_instance(allow_cpu_fallback=allow_cpu)
             dev = torch.device(self._device) if self._device else dm.get_device(0)
 
-            ckpt = torch.load(self.checkpoint_path, map_location=dev)
+            ckpt = torch.load(target_ckpt, map_location=dev)
             cfg_dict = ckpt["config"]
             config = ZenoLMConfig(**cfg_dict)
             model = ZenoLMModel(config).to(dev)
@@ -652,12 +659,13 @@ class ZenoLMProvider(BaseAIProvider):
             if not placement_audit["is_verified"] and not allow_cpu:
                 raise RuntimeError(f"GPU placement validation failed: {placement_audit['mismatched_tensors']}")
 
-            tokenizer = ZenoTokenizer.load_vocabulary(self.vocab_path)
+            tokenizer = ZenoTokenizer.load_vocabulary(target_vocab)
             self._model = model
             self._tokenizer = tokenizer
             self._device = dev
+            self._active_model_id = req_model_id
             self._initialized = True
-            logger.info(f"ZenoLMProvider loaded model on {dev} from {self.checkpoint_path}")
+            logger.info(f"ZenoLMProvider loaded model {req_model_id} on {dev} from {target_ckpt}")
         except Exception as e:
             logger.error(f"Failed to load ZenoLM model: {e}")
             self._init_error = str(e)
@@ -674,7 +682,7 @@ class ZenoLMProvider(BaseAIProvider):
         return os.path.exists(self.checkpoint_path) and os.path.exists(self.vocab_path)
 
     def get_supported_models(self) -> List[Dict[str, Any]]:
-        return [
+        models = [
             {
                 "id": "zenolm-micro-2m",
                 "name": "ZenoLM Micro 2M (Sovereign Local)",
@@ -685,6 +693,17 @@ class ZenoLMProvider(BaseAIProvider):
                 "is_sovereign": True
             }
         ]
+        if os.path.exists("C:/zenoai/checkpoints/zeno_lm_100m.pt"):
+            models.append({
+                "id": "zenolm-100m",
+                "name": "ZenoLM 100M Foundation (Sovereign Local)",
+                "context_window": 1024,
+                "cost_per_1k_input_paise": 0,
+                "cost_per_1k_output_paise": 0,
+                "indic_support": True,
+                "is_sovereign": True
+            })
+        return models
 
     async def stream_chat(
         self,
@@ -694,7 +713,7 @@ class ZenoLMProvider(BaseAIProvider):
         max_tokens: int = 256,
         system_instruction: Optional[str] = None
     ) -> AsyncGenerator[Dict[str, Any], None]:
-        self._ensure_loaded()
+        self._ensure_loaded(model_id=model)
         if not self._initialized or self._model is None:
             err_msg = str(self._init_error)
             code = AIErrorCode.GPU_UNAVAILABLE if ("GPU" in err_msg or "CUDA" in err_msg) else AIErrorCode.MODEL_UNAVAILABLE
