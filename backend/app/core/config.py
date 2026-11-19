@@ -102,7 +102,8 @@ class Settings(BaseSettings):
     MEDIA_S3_ENDPOINT_URL: Optional[str] = None  # e.g. https://<account>.r2.cloudflarestorage.com
     MEDIA_CDN_BASE_URL: Optional[str] = None     # e.g. https://cdn.intellidev.in/public
 
-    # Universal Search & External Ecosystem Integration (Phase 28 / Phase 2.2)
+    # Universal Search & External Ecosystem Integration (Brave Search API)
+    BRAVE_SEARCH_API_KEY: Optional[str] = None
     GOOGLE_SEARCH_API_KEY: Optional[str] = None
     GOOGLE_SEARCH_CX: Optional[str] = None
     YOUTUBE_API_KEY: Optional[str] = None

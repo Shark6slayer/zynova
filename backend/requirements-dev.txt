@@ -1,0 +1,3 @@
+# Test and development dependencies for ZENOVA Backend
+pytest>=8.3.0
+pytest-asyncio>=0.24.0
