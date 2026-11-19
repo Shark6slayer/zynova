@@ -15,7 +15,7 @@ httpx>=0.28.0
 aiofiles==25.1.0
 certifi>=2024.7.4
 dnspython>=2.6.0
-boto3>=1.35.0
+# Cloudflare R2 / S3 storage (aioboto3 manages compatible boto3, botocore, and s3transfer)
 aioboto3>=13.2.0
 requests>=2.34.2,<3
 websocket-client>=1.3.3
