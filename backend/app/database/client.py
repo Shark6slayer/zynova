@@ -153,6 +153,19 @@ async def _setup_indexes() -> None:
         await db_manager.db.payment_transactions.create_index([("idempotency_key", 1)], unique=True, sparse=True)
         await db_manager.db.payment_transactions.create_index([("transaction_ref", 1)], unique=True)
 
+        # ZenoSocial Messaging & Content Sharing Indexes
+        await db_manager.db.social_conversations.create_index([("participant_ids", 1), ("updated_at", -1)])
+        await db_manager.db.social_messages.create_index([("conversation_id", 1), ("created_at", 1)])
+        await db_manager.db.social_messages.create_index([("sender_id", 1), ("recipient_id", 1), ("status", 1)])
+
+        # ZenoSocial Interrelate & Connect Interconnect Indexes
+        await db_manager.db.social_interrelate.create_index([("user_a", 1), ("user_b", 1), ("status", 1)])
+        await db_manager.db.connect_interconnect.create_index([("user_a", 1), ("user_b", 1), ("status", 1)])
+
+        # Mobile Number Account Ownership Indexes
+        await db_manager.db.verified_phone_accounts.create_index([("phone_number", 1), ("account_type", 1)])
+        await db_manager.db.device_sessions.create_index([("device_fingerprint", 1), ("is_active", 1)])
+
         # Startup demo seeding is strictly opt-in via ALLOW_DEMO_SEEDING (disabled by default in all environments)
         if getattr(settings, "ALLOW_DEMO_SEEDING", False) and settings.ENVIRONMENT.lower() != "production":
             await _seed_food_catalog()

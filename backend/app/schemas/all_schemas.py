@@ -1142,3 +1142,124 @@ class SensitiveActionResponse(BaseModel):
     action_type: str
     executed_at: datetime
     audit_sequence: Optional[int] = None
+
+# ==========================================================
+# Phase 28: ZenoSocial Messaging, Account Control & Interrelate
+# ==========================================================
+
+class SocialMessageSendPayload(BaseModel):
+    recipient_zen_id: str = Field(..., min_length=2, max_length=50)
+    text: str = Field(..., min_length=1, max_length=2000)
+    reply_to_message_id: Optional[str] = None
+
+class SocialContentSharePayload(BaseModel):
+    recipient_zen_ids: List[str] = Field(..., min_length=1, max_length=10)
+    content_type: str = Field(..., pattern="^(reel|post)$")
+    content_id: str = Field(..., min_length=1, max_length=100)
+    message: Optional[str] = Field(None, max_length=500)
+
+class SocialMessageResponse(BaseModel):
+    id: str
+    conversation_id: str
+    sender_id: str
+    sender_zen_id: str
+    recipient_id: str
+    recipient_zen_id: str
+    text: str
+    shared_content: Optional[Dict[str, Any]] = None
+    status: str = "sent" # "sent", "delivered", "read"
+    created_at: datetime
+
+class SocialConversationResponse(BaseModel):
+    id: str
+    participant_ids: List[str]
+    participant_zen_ids: List[str]
+    other_participant: UserPublicSummary
+    is_mutual_follow: bool
+    messages_sent_by_me: int
+    remaining_messages_allowed: int
+    can_send_message: bool
+    last_message: Optional[Dict[str, Any]] = None
+    unread_count: int = 0
+    updated_at: datetime
+
+class PhoneAccountVerifyPayload(BaseModel):
+    phone_number: str = Field(..., min_length=10, max_length=15)
+    otp_code: str = Field(..., min_length=4, max_length=8)
+    desired_account_type: str = Field(..., pattern="^(personal|creator|business)$")
+    hardware_sim_slot: Optional[int] = None
+
+class PhoneAccountOwnershipResponse(BaseModel):
+    phone_number_masked: str
+    total_accounts_owned: int
+    personal_account_id: Optional[str] = None
+    creator_account_id: Optional[str] = None
+    business_account_id: Optional[str] = None
+    can_create_personal: bool
+    can_create_creator: bool
+    can_create_business: bool
+    allowed: bool
+    message: str
+
+class DeviceAttestationPayload(BaseModel):
+    package_name: str
+    version_code: int
+    signature_sha256: str
+    play_integrity_token: Optional[str] = None
+    is_emulated_storage_cloned: bool = False
+    platform_abi: Optional[str] = None
+    device_fingerprint_hash: str
+
+class DeviceAttestationResponse(BaseModel):
+    verified: bool
+    package_valid: bool
+    signature_trusted: bool
+    active_device_session_id: str
+    clone_suspect: bool
+    message: str
+
+class InterrelateRequestPayload(BaseModel):
+    partner_zen_id: str = Field(..., min_length=2, max_length=50)
+    relationship_type: str = Field("partner", max_length=50)
+    note: Optional[str] = None
+
+class InterrelateRespondPayload(BaseModel):
+    request_id: str = Field(..., min_length=1)
+    action: str = Field(..., pattern="^(accept|reject)$")
+
+class InterrelatePermissionsUpdatePayload(BaseModel):
+    show_relationship_badge: bool
+    share_activity_status: bool
+    shared_media_vault_access: bool
+
+class InterrelateStatusResponse(BaseModel):
+    is_connected: bool
+    partner: Optional[UserPublicSummary] = None
+    relationship_type: Optional[str] = None
+    connected_since: Optional[datetime] = None
+    my_permissions: Dict[str, bool]
+    partner_permissions: Dict[str, bool]
+    pending_requests: List[Dict[str, Any]] = []
+
+class InterconnectInvitePayload(BaseModel):
+    target_phone_number: str = Field(..., min_length=10, max_length=15)
+    note: Optional[str] = None
+
+class InterconnectRespondPayload(BaseModel):
+    invite_id: str = Field(..., min_length=1)
+    action: str = Field(..., pattern="^(accept|reject)$")
+
+class InterconnectPermissionsPayload(BaseModel):
+    share_online_presence: bool
+    allow_conversation_sync: bool
+    authorized_conversation_ids: List[str] = []
+    shared_notes_access: bool
+
+class InterconnectStatusResponse(BaseModel):
+    is_connected: bool
+    partner_user_id: Optional[str] = None
+    partner_phone_masked: Optional[str] = None
+    connected_since: Optional[datetime] = None
+    my_permissions: Dict[str, Any]
+    partner_permissions: Dict[str, Any]
+    pending_invites: List[Dict[str, Any]] = []
