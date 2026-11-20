@@ -107,10 +107,23 @@ class Settings(BaseSettings):
     MEDIA_S3_ENDPOINT_URL: Optional[str] = None  # e.g. https://<account>.r2.cloudflarestorage.com
     MEDIA_CDN_BASE_URL: Optional[str] = None     # e.g. https://cdn.intellidev.in/public
 
-    # Universal Search & External Ecosystem Integration (Phase 28 / Phase 2.2)
+    # Universal Search & External Ecosystem Integration (Brave Search API)
+    BRAVE_SEARCH_API_KEY: Optional[str] = None
     GOOGLE_SEARCH_API_KEY: Optional[str] = None
     GOOGLE_SEARCH_CX: Optional[str] = None
     YOUTUBE_API_KEY: Optional[str] = None
+
+    # Transactional Email & GoDaddy Titan SMTP Configuration (Phase 2)
+    SMTP_HOST: str = "smtpout.secureserver.net"
+    SMTP_PORT: int = 465
+    SMTP_USERNAME: str = "no-reply@intellidev.in"
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_USE_SSL: bool = True
+    SMTP_FROM_EMAIL: str = "no-reply@intellidev.in"
+    SMTP_FROM_NAME: str = "SUPER_AI"
+    SMTP_TIMEOUT_SECONDS: float = 10.0
+    SMTP_MAX_RETRIES: int = 3
+    SMTP_RETRY_DELAY_SECONDS: float = 1.0
 
     # Meta / Instagram Graph API Integration (Instagram via Facebook Login)
     META_APP_ID: Optional[str] = None

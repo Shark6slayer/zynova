@@ -21,6 +21,8 @@ class UserProfileResponse(BaseModel):
     bio: Optional[str] = None
     created_at: datetime
     is_active: bool = True
+    is_verified: bool = True
+    verified_at: Optional[datetime] = None
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -30,6 +32,35 @@ class TokenResponse(BaseModel):
 
 class TokenRefreshRequest(BaseModel):
     refresh_token: str
+
+class VerifyEmailRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+
+class ResendVerificationRequest(BaseModel):
+    email: EmailStr
+
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+
+class VerifyResetCodeRequest(BaseModel):
+    email: EmailStr
+    code: str = Field(..., min_length=6, max_length=6)
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    reset_token: str = Field(..., min_length=10)
+    new_password: str = Field(..., min_length=8, max_length=128)
+    confirm_password: Optional[str] = None
+
+class AuthStatusResponse(BaseModel):
+    status: str
+    message: str
+    email: Optional[str] = None
+    reset_token: Optional[str] = None
+    id: Optional[str] = None
+    username: Optional[str] = None
+    full_name: Optional[str] = None
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=60)

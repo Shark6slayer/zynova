@@ -60,8 +60,21 @@ async def test_auth_registration_validation_and_login_success(isolated_auth_test
         assert reg_res.status_code == 201
         reg_data = reg_res.json()
         assert reg_data["email"] == test_email
-        assert reg_data["username"] == f"user_{unique_suffix}"
-        assert "id" in reg_data
+        assert reg_data["status"] == "verification_required"
+
+        # Verify unverified account cannot log in
+        unverified_login = await ac.post("/api/v1/auth/login", json={
+            "email": test_email,
+            "password": "StrongPassword2026!"
+        })
+        assert unverified_login.status_code == 403
+        assert "not verified" in unverified_login.json().get("detail", "").lower()
+
+        # Mark user as verified to test subsequent lifecycle
+        db = get_database()
+        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
+        user_doc = await db.users.find_one({"email": test_email})
+        user_id = str(user_doc["_id"])
 
         # 3. Duplicate registration fails closed (400)
         dup_res = await ac.post("/api/v1/auth/register", json={
@@ -86,7 +99,7 @@ async def test_auth_registration_validation_and_login_success(isolated_auth_test
         # Verify access token structure and subject
         payload = decode_token(tokens["access_token"])
         assert payload is not None
-        assert payload["sub"] == reg_data["id"]
+        assert payload["sub"] == user_id
         assert payload["email"] == test_email
 
 @pytest.mark.asyncio
@@ -143,7 +156,12 @@ async def test_auth_protected_routes_and_authorization(isolated_auth_test_env):
             "full_name": "QA Test User",
             "password": "StrongPassword2026!"
         })
-        user_id = reg_res.json()["id"]
+        assert reg_res.status_code == 201
+
+        db = get_database()
+        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
+        user_doc = await db.users.find_one({"email": test_email})
+        user_id = str(user_doc["_id"])
 
         login_res = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
@@ -167,12 +185,16 @@ async def test_auth_token_refresh_lifecycle(isolated_auth_test_env):
     isolated_auth_test_env(test_email)
     
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as ac:
-        await ac.post("/api/v1/auth/register", json={
+        reg_res = await ac.post("/api/v1/auth/register", json={
             "email": test_email,
             "username": f"user_{unique_suffix}",
             "full_name": "QA Test User",
             "password": "StrongPassword2026!"
         })
+        assert reg_res.status_code == 201
+
+        db = get_database()
+        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
 
         login_res = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
@@ -207,7 +229,12 @@ async def test_auth_logout_and_session_revocation(isolated_auth_test_env):
             "full_name": "QA Test User",
             "password": "StrongPassword2026!"
         })
-        user_id = reg_res.json()["id"]
+        assert reg_res.status_code == 201
+
+        db = get_database()
+        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
+        user_doc = await db.users.find_one({"email": test_email})
+        user_id = str(user_doc["_id"])
 
         login_res = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
@@ -245,7 +272,7 @@ async def test_auth_cross_account_isolation(isolated_auth_test_env):
             "full_name": "User One",
             "password": "StrongPassword2026!"
         })
-        user1_id = reg1.json()["id"]
+        assert reg1.status_code == 201
 
         # Register User 2
         reg2 = await ac.post("/api/v1/auth/register", json={
@@ -254,7 +281,15 @@ async def test_auth_cross_account_isolation(isolated_auth_test_env):
             "full_name": "User Two",
             "password": "StrongPassword2026!"
         })
-        user2_id = reg2.json()["id"]
+        assert reg2.status_code == 201
+
+        db = get_database()
+        await db.users.update_one({"email": email1}, {"$set": {"is_verified": True}})
+        await db.users.update_one({"email": email2}, {"$set": {"is_verified": True}})
+        u1_doc = await db.users.find_one({"email": email1})
+        u2_doc = await db.users.find_one({"email": email2})
+        user1_id = str(u1_doc["_id"])
+        user2_id = str(u2_doc["_id"])
 
         # Login both users
         login1 = await ac.post("/api/v1/auth/login", json={"email": email1, "password": "StrongPassword2026!"})

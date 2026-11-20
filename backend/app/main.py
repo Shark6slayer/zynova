@@ -15,6 +15,8 @@ SECRET_PATTERNS = [
     re.compile(r"(fb_exchange_token=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(refresh_token=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(state=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(smtp_password=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(password=)[^&\s]+", re.IGNORECASE),
 ]
 
 class SensitiveDataRedactionFilter(logging.Filter):
