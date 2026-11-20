@@ -65,3 +65,6 @@ emulator_screen*.png
 # Uploaded/generated media
 backend/storage/media/*
 !backend/storage/media/.gitkeep
+backend/storage/videos/*
+!backend/storage/videos/.gitkeep
+*.bak.txt

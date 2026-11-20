@@ -108,6 +108,18 @@ class Settings(BaseSettings):
     GOOGLE_SEARCH_CX: Optional[str] = None
     YOUTUBE_API_KEY: Optional[str] = None
 
+    # Transactional Email & GoDaddy Titan SMTP Configuration (Phase 2)
+    SMTP_HOST: str = "smtpout.secureserver.net"
+    SMTP_PORT: int = 465
+    SMTP_USERNAME: str = "no-reply@intellidev.in"
+    SMTP_PASSWORD: Optional[str] = None
+    SMTP_USE_SSL: bool = True
+    SMTP_FROM_EMAIL: str = "no-reply@intellidev.in"
+    SMTP_FROM_NAME: str = "SUPER_AI"
+    SMTP_TIMEOUT_SECONDS: float = 10.0
+    SMTP_MAX_RETRIES: int = 3
+    SMTP_RETRY_DELAY_SECONDS: float = 1.0
+
     # Meta / Instagram Graph API Integration (Instagram via Facebook Login)
     META_APP_ID: Optional[str] = None
     META_APP_SECRET: Optional[str] = None
