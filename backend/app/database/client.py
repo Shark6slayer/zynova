@@ -38,6 +38,9 @@ async def connect_to_database() -> None:
             "serverSelectionTimeoutMS": 5000,
             "connectTimeoutMS": 10000,
             "socketTimeoutMS": 10000,
+            "maxPoolSize": 50,
+            "minPoolSize": 5,
+            "waitQueueTimeoutMS": 2000,
         }
         
         # If connecting via TLS or Atlas SRV, explicitly use certifi CA bundle
@@ -84,8 +87,9 @@ async def _setup_indexes() -> None:
         # Notifications indexes
         await db_manager.db.notifications.create_index([("user_id", 1), ("created_at", -1)])
         
-        # Refresh tokens index with TTL
+        # Refresh tokens index with TTL and unique user_id index
         await db_manager.db.refresh_tokens.create_index("token", unique=True)
+        await db_manager.db.refresh_tokens.create_index("user_id", unique=True)
 
         # Chat rooms indexes
         await db_manager.db.chat_rooms.create_index("participants")

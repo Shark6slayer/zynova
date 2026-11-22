@@ -44,7 +44,7 @@ class AccountDeletionService:
             raise RuntimeError("Database unavailable")
 
         user = await db.users.find_one({"_id": ObjectId(user_id)})
-        if not user or not verify_password(password, user["hashed_password"]):
+        if not user or not await asyncio.to_thread(verify_password, password, user["hashed_password"]):
             raise ValueError("Incorrect password. Deletion request rejected.")
 
         if user.get("account_status") == "pending_deletion":
@@ -200,7 +200,7 @@ class AccountDeletionService:
             raise RuntimeError("Database unavailable")
 
         user = await db.users.find_one({"email": clean_email})
-        if not user or not verify_password(password, user["hashed_password"]):
+        if not user or not await asyncio.to_thread(verify_password, password, user["hashed_password"]):
             raise ValueError("Invalid email or password.")
 
         user_id = str(user["_id"])

@@ -423,7 +423,7 @@ async def verify_sensitive_action(
     # 4. Optional / Mandatory reauthentication if password supplied
     if payload.password:
         user_doc = await db.users.find_one({"_id": ObjectId(current_uid)})
-        if not user_doc or not verify_password(payload.password, user_doc["hashed_password"]):
+        if not user_doc or not await asyncio.to_thread(verify_password, payload.password, user_doc["hashed_password"]):
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Password reauthentication failed")
 
     # Mark challenge as consumed (prevent replay)

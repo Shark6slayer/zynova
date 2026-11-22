@@ -105,7 +105,7 @@ async def deactivate_my_account(
         raise HTTPException(status_code=503, detail="Database unavailable")
 
     user = await db.users.find_one({"_id": ObjectId(current_user["id"])})
-    if not user or not verify_password(req.password, user["hashed_password"]):
+    if not user or not await asyncio.to_thread(verify_password, req.password, user["hashed_password"]):
         raise HTTPException(status_code=400, detail="Incorrect password. Deactivation aborted.")
 
     user_id = current_user["id"]

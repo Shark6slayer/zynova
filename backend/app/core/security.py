@@ -1,3 +1,4 @@
+import asyncio
 from passlib.context import CryptContext
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
@@ -8,15 +9,23 @@ from app.core.config import settings
 pwd_context = CryptContext(schemes=["argon2"], deprecated="auto")
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """Verifies plain password against Argon2 hashed password."""
+    """Verifies plain password against Argon2 hashed password (synchronous)."""
     try:
         return pwd_context.verify(plain_password, hashed_password)
     except Exception:
         return False
 
 def get_password_hash(password: str) -> str:
-    """Hashes plain password using Argon2id."""
+    """Hashes plain password using Argon2id (synchronous)."""
     return pwd_context.hash(password)
+
+async def verify_password_async(plain_password: str, hashed_password: str) -> bool:
+    """Non-blocking password verification running Argon2id in a thread pool."""
+    return await asyncio.to_thread(verify_password, plain_password, hashed_password)
+
+async def get_password_hash_async(password: str) -> str:
+    """Non-blocking password hashing running Argon2id in a thread pool."""
+    return await asyncio.to_thread(get_password_hash, password)
 
 import uuid
 

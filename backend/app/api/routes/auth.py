@@ -81,23 +81,19 @@ async def register(user_in: UserRegister):
     if db is None:
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
 
-    # 1. Check for existing user in permanent 'users' collection
-    existing_user = await db.users.find_one({
-        "$or": [{"email": clean_email}, {"username": clean_username}]
-    })
+    # 1 & 2. Concurrently check for existing user and pending registration
+    user_query = {"$or": [{"email": clean_email}, {"username": clean_username}]}
+    existing_user, pending_reg = await asyncio.gather(
+        db.users.find_one(user_query),
+        db.pending_registrations.find_one(user_query)
+    )
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="An account with this email or username already exists."
         )
 
-    # 2. Check for existing pending registration
-    # If a pending registration exists and has expired, clean it up.
-    # If still active, we will allow replacing or re-initiating after checking cooldown.
     now = datetime.now(timezone.utc)
-    pending_reg = await db.pending_registrations.find_one({
-        "$or": [{"email": clean_email}, {"username": clean_username}]
-    })
     if pending_reg:
         # If username matches another pending email, block collision
         if pending_reg.get("username") == clean_username and pending_reg.get("email") != clean_email:
@@ -122,7 +118,7 @@ async def register(user_in: UserRegister):
 
     # 4. Save/update temporary record in 'pending_registrations' collection (NEVER in 'users')
     # Store ONLY the hash in pending_registrations (with attempts=0, expires_at, hashed password).
-    hashed_pwd = get_password_hash(user_in.password)
+    hashed_pwd = await asyncio.to_thread(get_password_hash, user_in.password)
     expires_at = now + timedelta(minutes=OTP_EXPIRY_MINUTES)
     pending_doc = {
         "email": clean_email,
@@ -439,7 +435,11 @@ async def login(credentials: UserLogin):
     user = await db.users.find_one({"email": clean_email})
     t_db_post = time.perf_counter()
 
-    if not user or not verify_password(credentials.password, user["hashed_password"]):
+    is_valid = False
+    if user and user.get("hashed_password"):
+        is_valid = await asyncio.to_thread(verify_password, credentials.password, user["hashed_password"])
+
+    if not user or not is_valid:
         t_pwd = time.perf_counter()
         logger.info(
             f"[LoginTiming] Lookup: {round((t_db_post - t_db_pre) * 1000, 1)}ms | "
@@ -690,7 +690,7 @@ async def reset_password(data: ResetPasswordRequest):
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User account not found.")
 
-    new_hash = get_password_hash(data.new_password)
+    new_hash = await asyncio.to_thread(get_password_hash, data.new_password)
     now = datetime.now(timezone.utc)
 
     # Concurrently update password and invalidate all active refresh tokens/sessions

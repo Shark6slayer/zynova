@@ -405,7 +405,7 @@ async def lock_conversation(current_user: dict, conversation_id: str, pin: str) 
     if not room:
         raise LookupError("Conversation not found")
 
-    hashed_pin = get_password_hash(pin)
+    hashed_pin = await asyncio.to_thread(get_password_hash, pin)
     await db.chat_rooms.update_one(
         {"_id": ObjectId(conversation_id)},
         {"$set": {f"locked_by.{current_uid}": hashed_pin}}
@@ -424,7 +424,7 @@ async def unlock_conversation(current_user: dict, conversation_id: str, pin: str
     if not locked_hash:
         return {"status": "unlocked", "conversation_id": conversation_id}
 
-    if not verify_password(pin, locked_hash):
+    if not await asyncio.to_thread(verify_password, pin, locked_hash):
         raise PermissionError("Incorrect PIN for locked chat")
 
     return {"status": "verified", "conversation_id": conversation_id, "unlocked": True}
