@@ -132,6 +132,18 @@ class CatalystMailService:
                 raise CatalystOAuthException(f"Network error during Catalyst OAuth refresh: {type(e).__name__}") from e
 
     @classmethod
+    def _mask_email(cls, email: str) -> str:
+        """Masks an email address for privacy-safe logging (e.g., u***r@example.com)."""
+        if not email or "@" not in email:
+            return "***"
+        local, domain = email.split("@", 1)
+        if len(local) <= 2:
+            masked_local = local[0] + "*"
+        else:
+            masked_local = local[0] + "*" * (len(local) - 2) + local[-1]
+        return f"{masked_local}@{domain}"
+
+    @classmethod
     async def send_email(
         cls,
         to_email: str,
@@ -141,11 +153,16 @@ class CatalystMailService:
     ) -> Dict[str, Any]:
         """
         Sends an email using Zoho Catalyst Cloud Scale Mail REST API.
-        Enforces multipart/form-data payload, authorization header, and Environment header.
+        Payload strictly adheres to Catalyst Mail API specification:
+          - from_email: str (verified sender in Catalyst console)
+          - to_email: List[str] (max 10 recipients)
+          - subject: str
+          - content: str (HTML markup or text)
+          - html_mode: bool (True for HTML)
         """
         cid = uuid.uuid4().hex[:12]
-        recipient_domain = to_email.split('@')[-1] if '@' in to_email else 'invalid'
-        logger.info(f"[CatalystMail][{cid}] Initiating email dispatch to domain: @{recipient_domain}")
+        masked_recipient = cls._mask_email(to_email) if isinstance(to_email, str) else [cls._mask_email(e) for e in to_email]
+        logger.info(f"[CatalystMail][{cid}] Initiating email dispatch to: {masked_recipient}")
 
         access_token = await cls.get_access_token(correlation_id=cid)
 
@@ -155,26 +172,41 @@ class CatalystMailService:
 
         headers = {
             "Authorization": f"Zoho-oauthtoken {access_token}",
-            "Zoho-oauthtoken": access_token,
             "Environment": settings.CATALYST_ENVIRONMENT,
-            "X-Catalyst-Environment": settings.CATALYST_ENVIRONMENT,
-            "PROJECT_ID": str(project_id),
             "Content-Type": "application/json",
         }
 
         # Catalyst Cloud Scale Mail REST API payload:
-        # from_email, display_name, to_email (list of strings), subject, html_mode, content
+        # from_email: string (verified sender in Catalyst console)
+        # to_email: list of strings (array of recipient emails)
+        # subject: string
+        # content: string
+        # html_mode: boolean (true, NOT string "true")
+        # Note: display_name and text_content are not part of the standard Catalyst Mail API schema.
         recipients = [to_email] if isinstance(to_email, str) else list(to_email)
         payload = {
             "from_email": settings.CATALYST_FROM_EMAIL,
-            "display_name": settings.effective_catalyst_display_name,
             "to_email": recipients,
             "subject": subject,
-            "html_mode": "true",
             "content": html_content,
+            "html_mode": True,
         }
-        if text_content:
-            payload["text_content"] = text_content
+
+        # Safe debug logging: log JSON keys and value types sent, endpoint host/path, masked emails.
+        # NEVER log raw content, tokens, or OTP.
+        parsed_url = httpx.URL(endpoint_url)
+        payload_meta = {
+            k: {
+                "type": type(v).__name__,
+                "length": len(v) if isinstance(v, (str, list, dict)) else None,
+                "sample": [cls._mask_email(x) for x in v] if k == "to_email" else (cls._mask_email(v) if k == "from_email" else None)
+            }
+            for k, v in payload.items()
+        }
+        logger.info(
+            f"[CatalystMail][{cid}] Request Dispatch -> Host: {parsed_url.host}, Path: {parsed_url.path}, "
+            f"Headers: {list(headers.keys())}, PayloadMeta: {payload_meta}"
+        )
 
         try:
             async with httpx.AsyncClient(timeout=settings.CATALYST_REQUEST_TIMEOUT_SECONDS) as client:
@@ -187,20 +219,22 @@ class CatalystMailService:
                     raise CatalystOAuthException(f"Catalyst Mail authentication rejected: HTTP {resp.status_code}")
 
                 if resp.status_code not in (200, 201, 202):
-                    try:
-                        err_data = resp.json()
-                        clean_err = str(err_data.get("message") or err_data.get("error") or err_data.get("data") or err_data)[:200]
-                    except Exception:
-                        clean_err = resp.text[:200]
-                    logger.error(f"[CatalystMail][{cid}] Catalyst Mail API HTTP {resp.status_code} - sanitized_msg={clean_err}")
-                    raise CatalystDeliveryException(f"Catalyst Mail API error: HTTP {resp.status_code}")
+                    # Log the full raw response body for Catalyst error diagnostics
+                    error_body = resp.text
+                    logger.error(
+                        f"[CatalystMail][{cid}] Catalyst Mail API HTTP {resp.status_code} Error Response -> "
+                        f"Host: {parsed_url.host}, Path: {parsed_url.path}, FullBody: {error_body}"
+                    )
+                    raise CatalystDeliveryException(
+                        f"Catalyst Mail API error: HTTP {resp.status_code} - {error_body[:200]}"
+                    )
 
                 resp_json = resp.json()
-                logger.info(f"[CatalystMail][{cid}] Catalyst Mail dispatch accepted: HTTP {resp.status_code} for @{recipient_domain}")
+                logger.info(f"[CatalystMail][{cid}] Catalyst Mail dispatch accepted: HTTP {resp.status_code}")
                 return resp_json
 
         except httpx.TimeoutException as e:
-            logger.error(f"[CatalystMail][{cid}] Timeout during Catalyst email dispatch")
+            logger.error(f"[CatalystMail][{cid}] Timeout during Catalyst email dispatch to {parsed_url.host}")
             raise CatalystDeliveryException("Timeout while communicating with Zoho Catalyst Mail API") from e
         except httpx.RequestError as e:
             logger.error(f"[CatalystMail][{cid}] Network error during Catalyst email dispatch: {type(e).__name__}")

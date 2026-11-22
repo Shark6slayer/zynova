@@ -118,13 +118,33 @@ async def test_catalyst_send_email_success():
             assert res["status"] == "success"
             assert mock_post.call_count == 1
 
-            # Verify call arguments: URL, Environment header, Zoho-oauthtoken, and multipart files
+            # Verify call arguments: URL, headers, and exact JSON payload keys and types
             call_kwargs = mock_post.call_args.kwargs
             endpoint = mock_post.call_args.args[0]
             assert "83999000000013024" in endpoint
-            assert call_kwargs["headers"]["Zoho-oauthtoken"] == "valid_mock_token"
-            assert call_kwargs["headers"]["Environment"] == "Development"
-            assert "files" in call_kwargs
+            assert "api.catalyst.zoho.in" in endpoint
+            assert endpoint.endswith("/baas/v1/project/83999000000013024/email/send")
+            
+            # Headers verification
+            headers = call_kwargs["headers"]
+            assert headers["Authorization"] == "Zoho-oauthtoken valid_mock_token"
+            assert headers["Environment"] == "Development"
+            assert headers["Content-Type"] == "application/json"
+
+            # Payload keys and exact types verification
+            payload = call_kwargs["json"]
+            assert set(payload.keys()) == {"from_email", "to_email", "subject", "content", "html_mode"}
+            assert isinstance(payload["from_email"], str)
+            assert isinstance(payload["to_email"], list)
+            assert all(isinstance(x, str) for x in payload["to_email"])
+            assert payload["to_email"] == ["recipient@example.com"]
+            assert isinstance(payload["subject"], str)
+            assert isinstance(payload["content"], str)
+            assert isinstance(payload["html_mode"], bool)
+            assert payload["html_mode"] is True
+            # Assert unsupported fields are NOT in payload
+            assert "display_name" not in payload
+            assert "text_content" not in payload
 
 @pytest.mark.asyncio
 async def test_oauth_failure_handling():
