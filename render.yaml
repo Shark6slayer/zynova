@@ -60,3 +60,26 @@ services:
         value: https://www.intellidev.in
       - key: MOBILE_DEEP_LINK_SCHEME
         value: zenova
+      # Transactional Email - Zoho Catalyst Cloud Scale Mail (Phase 3 & Phase 3.1)
+      - key: EMAIL_PROVIDER
+        value: catalyst
+      - key: CATALYST_PROJECT_ID
+        value: "83999000000013024"
+      - key: CATALYST_CLIENT_ID
+        sync: false
+      - key: CATALYST_CLIENT_SECRET
+        sync: false
+      - key: CATALYST_REFRESH_TOKEN
+        sync: false
+      - key: CATALYST_ACCOUNTS_URL
+        value: https://accounts.zoho.in
+      - key: CATALYST_API_DOMAIN
+        value: https://api.catalyst.zoho.in
+      - key: CATALYST_FROM_EMAIL
+        value: no-reply@intellidev.in
+      - key: CATALYST_FROM_NAME
+        value: ZENOVA
+      - key: CATALYST_ENVIRONMENT
+        value: Production
+      - key: OTP_HASH_SECRET
+        generateValue: true

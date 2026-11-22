@@ -60,6 +60,14 @@ async def get_current_user(
     if not user:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     
+    # Block access if account is pending deletion
+    if user.get("account_status") == "pending_deletion":
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Account is pending deletion. Please recover your account to regain access.",
+            headers={"X-Error-Code": "ACCOUNT_PENDING_DELETION"}
+        )
+
     if not user.get("is_active", True):
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Account is deactivated")
 
@@ -104,7 +112,7 @@ async def get_optional_current_user(
         return None
     try:
         user = await db.users.find_one({"_id": ObjectId(user_id)})
-        if user and user.get("is_active", True):
+        if user and user.get("is_active", True) and user.get("account_status") != "pending_deletion":
             revoked_before = user.get("tokens_revoked_before")
             if revoked_before:
                 iat = payload.get("iat")

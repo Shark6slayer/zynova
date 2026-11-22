@@ -271,3 +271,10 @@ class OTPService:
         # Invalidate token immediately (Single-use)
         await _delete_store(token_key)
         return True, ""
+
+    @classmethod
+    async def clear_cooldown(cls, email: str) -> None:
+        """Clears verification and reset cooldowns for an email (used in test fixtures or administrative reset)."""
+        norm_email = email.lower().strip()
+        await _delete_store(f"{EMAIL_VERIFY_CD_PREFIX}{norm_email}")
+        await _delete_store(f"{PWD_RESET_CD_PREFIX}{norm_email}")

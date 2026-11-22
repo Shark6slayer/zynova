@@ -16,12 +16,12 @@ def test_email_template_rendering():
     text = render_verification_email_text(code, expiration_minutes=5)
 
     assert code in html
-    assert "SUPER_AI" in html
+    assert "ZENOVA" in html
     assert "5 minutes" in html
     assert "Security Notice" in html
 
     assert code in text
-    assert "SUPER_AI" in text
+    assert "ZENOVA" in text
     assert "5 minutes" in text
 
 def test_email_service_is_configured():

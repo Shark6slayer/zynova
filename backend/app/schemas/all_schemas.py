@@ -36,9 +36,11 @@ class TokenRefreshRequest(BaseModel):
 class VerifyEmailRequest(BaseModel):
     email: EmailStr
     code: str = Field(..., min_length=6, max_length=6)
+    verification_id: Optional[str] = Field(None, min_length=16, max_length=16, description="Optional 16-character alphanumeric verification challenge ID")
 
 class ResendVerificationRequest(BaseModel):
     email: EmailStr
+    verification_id: Optional[str] = Field(None, min_length=16, max_length=16, description="Optional 16-character alphanumeric verification challenge ID")
 
 class ForgotPasswordRequest(BaseModel):
     email: EmailStr
@@ -46,6 +48,7 @@ class ForgotPasswordRequest(BaseModel):
 class VerifyResetCodeRequest(BaseModel):
     email: EmailStr
     code: str = Field(..., min_length=6, max_length=6)
+    verification_id: Optional[str] = Field(None, min_length=16, max_length=16)
 
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
@@ -61,6 +64,9 @@ class AuthStatusResponse(BaseModel):
     id: Optional[str] = None
     username: Optional[str] = None
     full_name: Optional[str] = None
+    verification_id: Optional[str] = None
+    cooldown_seconds: Optional[int] = None
+    expires_in_seconds: Optional[int] = None
 
 class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=60)
@@ -69,6 +75,32 @@ class UserUpdate(BaseModel):
 
 class AccountDeleteRequest(BaseModel):
     password: str = Field(..., min_length=1)
+
+class DeletionRequestModel(BaseModel):
+    password: str = Field(..., min_length=1, description="Account password for recent authentication")
+    reason: Optional[str] = Field(None, max_length=500, description="Optional deletion reason")
+
+class DeletionStatusResponse(BaseModel):
+    status: str  # "active" | "pending_deletion" | "deleted"
+    account_status: str
+    deletion_requested_at: Optional[datetime] = None
+    permanent_deletion_at: Optional[datetime] = None
+    days_remaining: Optional[int] = None
+    seconds_remaining: Optional[int] = None
+    can_recover: bool = False
+    message: str
+
+class AccountRecoveryRequest(BaseModel):
+    email: EmailStr
+    password: str = Field(..., min_length=1)
+    otp_code: str = Field(..., min_length=6, max_length=6)
+
+class AccountRecoveryResponse(BaseModel):
+    status: str
+    message: str
+    email: str
+    account_status: str
+    recovered_at: datetime
 
 
 SUPPORTED_LANGUAGES = {

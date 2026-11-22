@@ -17,6 +17,9 @@ SECRET_PATTERNS = [
     re.compile(r"(state=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(smtp_password=)[^&\s]+", re.IGNORECASE),
     re.compile(r"(password=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(catalyst_client_secret=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(catalyst_refresh_token=)[^&\s]+", re.IGNORECASE),
+    re.compile(r"(Zoho-oauthtoken\s+)[^&\s]+", re.IGNORECASE),
 ]
 
 class SensitiveDataRedactionFilter(logging.Filter):
@@ -68,11 +71,30 @@ logger = logging.getLogger("super_ai_app")
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import Response
+import asyncio
+from typing import Optional
 
 from app.core.rate_limit import close_redis_connection
 
+deletion_worker_task: Optional[asyncio.Task] = None
+
+async def _background_deletion_sweeper():
+    """Periodic background sweeper that processes expired accounts for cascading deletion."""
+    from app.workers.account_deletion_worker import run_deletion_sweep
+    while True:
+        try:
+            await asyncio.sleep(settings.ACCOUNT_DELETION_WORKER_INTERVAL_SECONDS)
+            count = await run_deletion_sweep()
+            if count > 0:
+                logger.info(f"[InAppSweeper] Cascading deletion processed {count} accounts.")
+        except asyncio.CancelledError:
+            break
+        except Exception as e:
+            logger.error(f"[InAppSweeper] Error during deletion sweep: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    global deletion_worker_task
     # Startup: connect database and check critical configuration
     logger.info("Initializing SUPER_AI backend services...")
     if settings.JWT_SECRET_KEY == "super_ai_indic_sovereign_dev_secret_key_change_in_production_2026":
@@ -94,12 +116,25 @@ async def lifespan(app: FastAPI):
             # Phase 12: Registered devices and challenges indexes
             await db.registered_devices.create_index([("user_id", 1), ("public_key_hex", 1)])
             await db.security_challenges.create_index("expires_at", expireAfterSeconds=0)
+            # Deletion jobs indexes
+            await db.deletion_jobs.create_index([("status", 1), ("permanent_deletion_at", 1)])
+            await db.deletion_jobs.create_index("user_id", unique=True)
         except Exception as e:
             logger.warning(f"Index creation on collections skipped: {e}")
+
+    # Start in-app deletion sweeper if enabled
+    if settings.ACCOUNT_DELETION_WORKER_ENABLED:
+        deletion_worker_task = asyncio.create_task(_background_deletion_sweeper())
 
     yield
     # Shutdown: clean connections
     logger.info("Shutting down SUPER_AI backend services...")
+    if deletion_worker_task is not None:
+        deletion_worker_task.cancel()
+        try:
+            await deletion_worker_task
+        except asyncio.CancelledError:
+            pass
     await close_redis_connection()
     await close_database_connection()
 

@@ -218,6 +218,10 @@ class SharedRateLimiter:
 
 # Preserved route-specific rate limiters with designated limits and sensitivity
 auth_rate_limiter = SharedRateLimiter(namespace="auth", requests_limit=10, window_seconds=60, is_sensitive=True)
+email_verify_rate_limiter = SharedRateLimiter(namespace="email_verify", requests_limit=5, window_seconds=60, is_sensitive=True)
+email_resend_rate_limiter = SharedRateLimiter(namespace="email_resend", requests_limit=3, window_seconds=3600, is_sensitive=True)
+account_deletion_rate_limiter = SharedRateLimiter(namespace="account_deletion", requests_limit=5, window_seconds=300, is_sensitive=True)
+account_recovery_rate_limiter = SharedRateLimiter(namespace="account_recovery", requests_limit=5, window_seconds=300, is_sensitive=True)
 chat_rate_limiter = SharedRateLimiter(namespace="chat", requests_limit=60, window_seconds=60, is_sensitive=False)
 social_post_rate_limiter = SharedRateLimiter(namespace="social_post", requests_limit=10, window_seconds=60, is_sensitive=False)
 comment_rate_limiter = SharedRateLimiter(namespace="comment", requests_limit=30, window_seconds=60, is_sensitive=False)
@@ -235,6 +239,22 @@ balance_enquiry_rate_limiter = SharedRateLimiter(namespace="balance_enquiry", re
 async def check_auth_rate_limit(request: Request):
     client_ip = get_client_ip(request)
     await auth_rate_limiter.check_async(client_ip)
+
+async def check_email_verify_rate_limit(request: Request):
+    client_ip = get_client_ip(request)
+    await email_verify_rate_limiter.check_async(client_ip)
+
+async def check_email_resend_rate_limit(request: Request):
+    client_ip = get_client_ip(request)
+    await email_resend_rate_limiter.check_async(client_ip)
+
+async def check_account_deletion_rate_limit(request: Request):
+    client_ip = get_client_ip(request)
+    await account_deletion_rate_limiter.check_async(client_ip)
+
+async def check_account_recovery_rate_limit(request: Request):
+    client_ip = get_client_ip(request)
+    await account_recovery_rate_limiter.check_async(client_ip)
 
 def check_chat_user_rate_limit(user_id: str):
     chat_rate_limiter.check(user_id)
