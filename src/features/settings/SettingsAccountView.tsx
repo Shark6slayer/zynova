@@ -474,9 +474,9 @@ export const SettingsAccountView: React.FC = () => {
           </div>
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 p-4 rounded-xl bg-black/40 border border-rose-500/20">
             <div>
-              <h5 className="text-xs font-bold text-white">Delete Sovereign Account</h5>
+              <h5 className="text-xs font-bold text-white">Delete Sovereign Account (30-Day Grace Period)</h5>
               <p className="text-[11px] text-slate-400 max-w-md mt-0.5">
-                Permanently purge your account, preferences, conversations, and notifications in accordance with DPDP right to be forgotten. This cannot be undone.
+                Schedule your account for permanent deletion in accordance with DPDP right to erasure regulations. You will have a 30-day recovery grace period to reactivate your account before permanent cascading data erasure occurs.
               </p>
             </div>
             <button
@@ -498,9 +498,9 @@ export const SettingsAccountView: React.FC = () => {
               <AlertTriangle className="w-4 h-4 text-rose-400" />
               <span>Confirm Account Deletion</span>
             </div>
-            <h3 className="text-xl font-bold">Irreversible Action</h3>
+            <h3 className="text-xl font-bold">30-Day Account Deletion Protocol</h3>
             <p className="text-xs text-slate-400 leading-relaxed">
-              Please enter your password to confirm deletion of your account. All your preferences, conversations, active tokens, and personal records will be permanently removed.
+              Please enter your password to confirm scheduling your account for deletion. Your account will be deactivated immediately. You will have a 30-day grace period to cancel and recover your account via verified email OTP before permanent cascading deletion occurs.
             </p>
 
             {deleteError && (
@@ -543,7 +543,7 @@ export const SettingsAccountView: React.FC = () => {
                   className="px-4 py-2 rounded-xl bg-rose-600 hover:bg-rose-500 text-xs font-bold text-white flex items-center gap-1.5 transition disabled:opacity-50"
                 >
                   {isDeleting ? <Loader2 className="w-4 h-4 animate-spin" /> : <Trash2 className="w-4 h-4" />}
-                  <span>Permanently Delete</span>
+                  <span>Schedule 30-Day Deletion</span>
                 </button>
               </div>
             </form>

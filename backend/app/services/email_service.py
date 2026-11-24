@@ -32,7 +32,7 @@ def render_verification_email_html(code: str, expiration_minutes: int = 5) -> st
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SUPER_AI Verification Code</title>
+  <title>ZENOVA Verification Code</title>
   <style>
     body {{
       margin: 0;
@@ -145,7 +145,7 @@ def render_verification_email_html(code: str, expiration_minutes: int = 5) -> st
       <div class="header">
         <div class="badge">Sovereign Identity</div>
         <h1 class="title">Verify Your Email Address</h1>
-        <p class="subtitle">Use the verification code below to complete your SUPER_AI registration and secure your sovereign account.</p>
+        <p class="subtitle">Welcome to ZENOVA. Use the verification code below to complete your registration and secure your sovereign account.</p>
       </div>
 
       <div class="otp-box">
@@ -159,11 +159,11 @@ def render_verification_email_html(code: str, expiration_minutes: int = 5) -> st
       </div>
 
       <div class="warning">
-        <strong>Security Notice:</strong> Never share this code with anyone. SUPER_AI representatives will never ask for your verification code or password.
+        <strong>Security Notice:</strong> Never share this code with anyone. ZENOVA representatives will never ask for your verification code or password. If you did not request this verification, please ignore this email.
       </div>
 
       <div class="footer">
-        &copy; 2026 SUPER_AI &bull; IntelliDev Technologies<br>
+        &copy; 2026 ZENOVA &bull; ZENOVA Security Team &bull; Intellidev<br>
         This is an automated operational security message. Please do not reply directly to this email.
       </div>
     </div>
@@ -173,21 +173,20 @@ def render_verification_email_html(code: str, expiration_minutes: int = 5) -> st
 
 def render_verification_email_text(code: str, expiration_minutes: int = 5) -> str:
     """Renders plain-text email verification content."""
-    return f"""SUPER_AI - Verify Your Email Address
+    return f"""Welcome to ZENOVA.
 
-Use the 6-digit verification code below to confirm your email and complete your SUPER_AI registration:
-
-VERIFICATION CODE: {code}
+Your email verification code is:
+{code}
 
 - Valid for: {expiration_minutes} minutes
-- Security: Single-use code. Invalidated after 5 failed attempts or upon successful verification.
+- Security: Single-use code. Will expire after 5 incorrect attempts.
 
 SECURITY NOTICE:
-Never share this code with anyone. SUPER_AI will never contact you asking for your verification code. If you did not request this email, you can safely ignore it.
+Never share this code with anyone. If you did not request this verification, please ignore this email.
 
 ---
-SUPER_AI | IntelliDev Technologies
-Automated system notification. Do not reply to this email.
+ZENOVA Security Team
+Intellidev
 """
 
 class EmailService:
@@ -344,24 +343,62 @@ class EmailService:
         to_email: str,
         subject: str,
         html_content: str,
-        text_content: str
+        text_content: Optional[str] = None
     ) -> bool:
-        """Asynchronously dispatches an email via threadpool offload."""
+        """
+        Unified dispatch:
+        1. If EMAIL_PROVIDER is 'catalyst' (or Catalyst is configured): uses Zoho Catalyst Cloud Scale Mail.
+        2. In production: NEVER silently falls back to mock or SMTP if Catalyst is the configured provider.
+        3. In test/development environment: fallback to SMTP or mock if explicitly configured.
+        """
+        text_body = text_content or ""
+        provider = settings.EMAIL_PROVIDER.lower().strip()
+        is_production = settings.ENVIRONMENT.lower() == "production"
+
+        if provider == "catalyst":
+            from app.services.catalyst_mail_service import CatalystMailService, CatalystMailException
+            if not CatalystMailService.is_configured():
+                if is_production:
+                    raise EmailAuthException("Catalyst Mail is configured as primary provider in production but credentials are missing.")
+                logger.warning("Catalyst Mail credentials missing in development; attempting SMTP fallback.")
+            else:
+                try:
+                    await CatalystMailService.send_email(
+                        to_email=to_email,
+                        subject=subject,
+                        html_content=html_content,
+                        text_content=text_body
+                    )
+                    return True
+                except CatalystMailException as e:
+                    logger.error(f"Catalyst Mail dispatch error: {e}")
+                    if is_production:
+                        # Fail-closed in production: Do NOT silently deliver via unverified fallback
+                        raise EmailDeliveryException(f"Catalyst Mail delivery failed: {e}") from e
+                    logger.warning("Failing over to secondary transport in non-production environment.")
+
+        elif provider == "mock":
+            if is_production:
+                raise EmailDeliveryException("Mock email provider is strictly forbidden in production.")
+            logger.info(f"[MockEmail] Dispatched email to {to_email}: Subject='{subject}'")
+            return True
+
+        # SMTP Transport (Fallback or primary when EMAIL_PROVIDER == 'smtp')
         return await asyncio.to_thread(
             cls._send_email_sync,
             to_email,
             subject,
             html_content,
-            text_content
+            text_body
         )
 
     @classmethod
     async def send_verification_otp(cls, to_email: str, otp_code: str, expiration_minutes: int = 5) -> bool:
         """
         Sends the 6-digit verification OTP email to a user.
-        Uses the responsive SUPER_AI template.
+        Uses the responsive ZENOVA template.
         """
-        subject = "SUPER_AI – Verify Your Email Address"
+        subject = "Your ZENOVA Verification Code"
         html = render_verification_email_html(code=otp_code, expiration_minutes=expiration_minutes)
         text = render_verification_email_text(code=otp_code, expiration_minutes=expiration_minutes)
         return await cls.send_email(to_email=to_email, subject=subject, html_content=html, text_content=text)

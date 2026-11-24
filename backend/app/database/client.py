@@ -38,6 +38,9 @@ async def connect_to_database() -> None:
             "serverSelectionTimeoutMS": 5000,
             "connectTimeoutMS": 10000,
             "socketTimeoutMS": 10000,
+            "maxPoolSize": 50,
+            "minPoolSize": 5,
+            "waitQueueTimeoutMS": 2000,
         }
         
         # If connecting via TLS or Atlas SRV, explicitly use certifi CA bundle
@@ -84,8 +87,9 @@ async def _setup_indexes() -> None:
         # Notifications indexes
         await db_manager.db.notifications.create_index([("user_id", 1), ("created_at", -1)])
         
-        # Refresh tokens index with TTL
+        # Refresh tokens index with TTL and unique user_id index
         await db_manager.db.refresh_tokens.create_index("token", unique=True)
+        await db_manager.db.refresh_tokens.create_index("user_id", unique=True)
 
         # Chat rooms indexes
         await db_manager.db.chat_rooms.create_index("participants")
@@ -152,6 +156,21 @@ async def _setup_indexes() -> None:
         await db_manager.db.payment_transactions.create_index([("user_id", 1), ("created_at", -1)])
         await db_manager.db.payment_transactions.create_index([("idempotency_key", 1)], unique=True, sparse=True)
         await db_manager.db.payment_transactions.create_index([("transaction_ref", 1)], unique=True)
+
+        # ZENOVA Email Verifications Indexes (Phase 3)
+        await db_manager.db.email_verifications.create_index("verification_id", unique=True)
+        await db_manager.db.email_verifications.create_index([("email", 1), ("purpose", 1), ("status", 1)])
+        await db_manager.db.email_verifications.create_index([("email", 1), ("created_at", -1)])
+        # TTL index on expires_at removes old records after expiration automatically in background
+        await db_manager.db.email_verifications.create_index("expires_at", expireAfterSeconds=0)
+
+        # ZENOVA Pending Registrations Indexes (Critical Registration Fix)
+        # Temporary holding store: unverified registrations never touch 'users' collection
+        await db_manager.db.pending_registrations.create_index("email", unique=True)
+        await db_manager.db.pending_registrations.create_index("username", unique=True)
+        await db_manager.db.pending_registrations.create_index("verification_id")
+        # TTL index: expires automatically after expires_at timestamp (5 minutes)
+        await db_manager.db.pending_registrations.create_index("expires_at", expireAfterSeconds=0)
 
         # Startup demo seeding is strictly opt-in via ALLOW_DEMO_SEEDING (disabled by default in all environments)
         if getattr(settings, "ALLOW_DEMO_SEEDING", False) and settings.ENVIRONMENT.lower() != "production":

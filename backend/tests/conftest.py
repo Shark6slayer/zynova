@@ -2,13 +2,24 @@
 
 from __future__ import annotations
 
+import os
 import time
 from typing import Any, Dict, List, Optional, Tuple
 
 import pytest
 
+# Ensure required test secrets are set in test environment if not already loaded
+os.environ.setdefault("JWT_SECRET_KEY", "pytest_isolated_jwt_secret_key_32chars_len!")
+os.environ.setdefault("OTP_HASH_SECRET", "pytest_isolated_otp_hash_secret_key_32chars!")
+
 from app.core import rate_limit, token_revocation
 from app.core.config import settings
+
+# Explicitly ensure settings instance has test secrets configured
+if not getattr(settings, "JWT_SECRET_KEY", None):
+    settings.JWT_SECRET_KEY = "pytest_isolated_jwt_secret_key_32chars_len!"
+if not getattr(settings, "OTP_HASH_SECRET", None):
+    settings.OTP_HASH_SECRET = "pytest_isolated_otp_hash_secret_key_32chars!"
 
 
 class _FakePipeline:

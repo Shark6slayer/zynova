@@ -490,6 +490,8 @@ async def get_feed(
         except Exception:
             pass
 
+    # Exclude posts from accounts pending deletion or inactive
+    query["account_status"] = {"$ne": "pending_deletion"}
     cursor = db.posts.find(query).sort("created_at", -1).limit(limit)
     posts = []
     async for p in cursor:
@@ -548,6 +550,8 @@ async def get_user_posts(
         query["media_type"] = media_filter
         query["media_url"] = {"$ne": None}
 
+    # Exclude posts from accounts pending deletion or inactive
+    query["account_status"] = {"$ne": "pending_deletion"}
     cursor = db.posts.find(query).sort("created_at", -1).limit(limit)
 
     posts = []

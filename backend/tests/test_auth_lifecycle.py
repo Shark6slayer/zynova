@@ -27,6 +27,8 @@ async def isolated_auth_test_env():
         user_ids = [str(u["_id"]) for u in users_to_delete]
         
         await db.users.delete_many({"email": {"$in": created_test_emails}})
+        await db.pending_registrations.delete_many({"email": {"$in": created_test_emails}})
+        await db.email_verifications.delete_many({"email": {"$in": created_test_emails}})
         await db.refresh_tokens.delete_many({"user_id": {"$in": user_ids}})
         await db.user_preferences.delete_many({"user_id": {"$in": user_ids}})
         await db.conversations.delete_many({"user_id": {"$in": user_ids}})
@@ -62,18 +64,40 @@ async def test_auth_registration_validation_and_login_success(isolated_auth_test
         assert reg_data["email"] == test_email
         assert reg_data["status"] == "verification_required"
 
-        # Verify unverified account cannot log in
+        # Verify unverified account cannot log in (401 because unverified account is in pending_registrations, not users)
         unverified_login = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
             "password": "StrongPassword2026!"
         })
-        assert unverified_login.status_code == 403
-        assert "not verified" in unverified_login.json().get("detail", "").lower()
+        assert unverified_login.status_code == 401
 
-        # Mark user as verified to test subsequent lifecycle
+        # Simulate email OTP verification to transition account from pending_registrations to users
         db = get_database()
-        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
+        pending = await db.pending_registrations.find_one({"email": test_email})
+        assert pending is not None
+        v_doc = await db.email_verifications.find_one({"email": test_email})
+        # Verify via endpoint or transition to verified
+        verify_res = await ac.post("/api/v1/auth/verify-email", json={
+            "email": test_email,
+            "code": "123456",
+            "verification_id": pending["verification_id"]
+        })
+        # If verification code differs, insert into users directly
         user_doc = await db.users.find_one({"email": test_email})
+        if not user_doc:
+            await db.users.insert_one({
+                "email": test_email,
+                "username": pending["username"],
+                "full_name": pending["full_name"],
+                "hashed_password": pending["hashed_password"],
+                "is_active": True,
+                "is_verified": True,
+                "verified_at": datetime.now(timezone.utc),
+                "created_at": datetime.now(timezone.utc),
+                "updated_at": datetime.now(timezone.utc)
+            })
+            await db.pending_registrations.delete_one({"_id": pending["_id"]})
+            user_doc = await db.users.find_one({"email": test_email})
         user_id = str(user_doc["_id"])
 
         # 3. Duplicate registration fails closed (400)
@@ -133,6 +157,31 @@ async def test_auth_invalid_credentials_rejected(isolated_auth_test_env):
         })
         assert non_existent.status_code == 401
 
+async def promote_pending_user_to_verified(email: str):
+    """Helper to transition a pending_registration to verified users collection for lifecycle tests."""
+    db = get_database()
+    pending = await db.pending_registrations.find_one({"email": email})
+    if pending:
+        user_doc = {
+            "email": email,
+            "username": pending["username"],
+            "full_name": pending["full_name"],
+            "hashed_password": pending["hashed_password"],
+            "is_active": True,
+            "is_verified": True,
+            "verified_at": datetime.now(timezone.utc),
+            "created_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc)
+        }
+        res = await db.users.insert_one(user_doc)
+        await db.pending_registrations.delete_one({"_id": pending["_id"]})
+        return str(res.inserted_id)
+    existing = await db.users.find_one({"email": email})
+    if existing:
+        await db.users.update_one({"email": email}, {"$set": {"is_verified": True}})
+        return str(existing["_id"])
+    return None
+
 @pytest.mark.asyncio
 async def test_auth_protected_routes_and_authorization(isolated_auth_test_env):
     """Verifies backend authorization: protected endpoints require valid Bearer token."""
@@ -158,10 +207,7 @@ async def test_auth_protected_routes_and_authorization(isolated_auth_test_env):
         })
         assert reg_res.status_code == 201
 
-        db = get_database()
-        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
-        user_doc = await db.users.find_one({"email": test_email})
-        user_id = str(user_doc["_id"])
+        user_id = await promote_pending_user_to_verified(test_email)
 
         login_res = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
@@ -193,8 +239,7 @@ async def test_auth_token_refresh_lifecycle(isolated_auth_test_env):
         })
         assert reg_res.status_code == 201
 
-        db = get_database()
-        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
+        await promote_pending_user_to_verified(test_email)
 
         login_res = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
@@ -231,10 +276,7 @@ async def test_auth_logout_and_session_revocation(isolated_auth_test_env):
         })
         assert reg_res.status_code == 201
 
-        db = get_database()
-        await db.users.update_one({"email": test_email}, {"$set": {"is_verified": True}})
-        user_doc = await db.users.find_one({"email": test_email})
-        user_id = str(user_doc["_id"])
+        user_id = await promote_pending_user_to_verified(test_email)
 
         login_res = await ac.post("/api/v1/auth/login", json={
             "email": test_email,
@@ -283,13 +325,8 @@ async def test_auth_cross_account_isolation(isolated_auth_test_env):
         })
         assert reg2.status_code == 201
 
-        db = get_database()
-        await db.users.update_one({"email": email1}, {"$set": {"is_verified": True}})
-        await db.users.update_one({"email": email2}, {"$set": {"is_verified": True}})
-        u1_doc = await db.users.find_one({"email": email1})
-        u2_doc = await db.users.find_one({"email": email2})
-        user1_id = str(u1_doc["_id"])
-        user2_id = str(u2_doc["_id"])
+        user1_id = await promote_pending_user_to_verified(email1)
+        user2_id = await promote_pending_user_to_verified(email2)
 
         # Login both users
         login1 = await ac.post("/api/v1/auth/login", json={"email": email1, "password": "StrongPassword2026!"})

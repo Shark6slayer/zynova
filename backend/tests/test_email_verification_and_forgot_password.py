@@ -28,6 +28,8 @@ async def isolated_auth_test_env():
         user_ids = [str(u["_id"]) for u in users_to_delete]
         
         await db.users.delete_many({"email": {"$in": created_test_emails}})
+        await db.pending_registrations.delete_many({"email": {"$in": created_test_emails}})
+        await db.email_verifications.delete_many({"email": {"$in": created_test_emails}})
         await db.refresh_tokens.delete_many({"user_id": {"$in": user_ids}})
         await db.user_preferences.delete_many({"user_id": {"$in": user_ids}})
 
@@ -55,7 +57,8 @@ async def test_full_email_verification_lifecycle(isolated_auth_test_env):
     password = "SecurePassword123!"
     isolated_auth_test_env(test_email)
 
-    with patch("app.services.email_service.EmailService.send_email", new_callable=AsyncMock) as mock_send, \
+    with patch("app.services.email_service.EmailService.send_verification_otp", new_callable=AsyncMock) as mock_send, \
+         patch("app.services.verification_service.generate_six_digit_otp", return_value="654321"), \
          patch("app.core.otp_service.generate_six_digit_code", return_value="654321"):
         mock_send.return_value = True
 
@@ -73,19 +76,22 @@ async def test_full_email_verification_lifecycle(isolated_auth_test_env):
             assert reg_data["email"] == test_email
             assert mock_send.called
 
-            # Check DB is_verified is False
+            # Check DB: unverified account MUST NOT be in permanent users collection,
+            # but MUST be in pending_registrations
             db = get_database()
             user_in_db = await db.users.find_one({"email": test_email})
-            assert user_in_db is not None
-            assert user_in_db.get("is_verified") is False
+            assert user_in_db is None, "Unverified user MUST NOT exist in users collection"
+            
+            pending_in_db = await db.pending_registrations.find_one({"email": test_email})
+            assert pending_in_db is not None
+            assert pending_in_db["email"] == test_email
 
-            # 2. Login before verification must fail with 403
+            # 2. Login before verification must fail with 401 (not found in users collection)
             login_fail = await ac.post("/api/v1/auth/login", json={
                 "email": test_email,
                 "password": password
             })
-            assert login_fail.status_code == 403
-            assert "not verified" in login_fail.json()["detail"].lower()
+            assert login_fail.status_code == 401
 
             # 3. Verify with incorrect code
             wrong_res = await ac.post("/api/v1/auth/verify-email", json={

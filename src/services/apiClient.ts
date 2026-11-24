@@ -1017,12 +1017,63 @@ class ApiClient {
   }
 
   async deleteAccount(password: string): Promise<{ status: string; detail: string }> {
-    const res = await this.request<{ status: string; detail: string }>('/users/me', {
-      method: 'DELETE',
-      body: JSON.stringify({ password }),
+    const res = await this.request<{ status: string; detail: string }>('/account/deletion/request', {
+      method: 'POST',
+      body: JSON.stringify({ password, reason: 'User requested deletion via settings' }),
     });
     this.clearTokens();
     return res;
+  }
+
+  async requestAccountDeletion(password: string, reason?: string): Promise<{
+    status: string;
+    account_status: string;
+    deletion_requested_at: string;
+    permanent_deletion_at: string;
+    days_remaining: number;
+    message: string;
+  }> {
+    const res = await this.request<any>('/account/deletion/request', {
+      method: 'POST',
+      body: JSON.stringify({ password, reason: reason || 'User requested deletion via settings' }),
+    });
+    this.clearTokens();
+    return res;
+  }
+
+  async getAccountDeletionStatus(): Promise<{
+    status: string;
+    account_status: string;
+    deletion_requested_at?: string;
+    permanent_deletion_at?: string;
+    days_remaining?: number;
+    message: string;
+  }> {
+    return this.request<any>('/account/deletion/status');
+  }
+
+  async requestAccountRecoveryOTP(email: string): Promise<{ status: string; message: string; email: string }> {
+    return this.request<any>('/account/deletion/recovery-otp', {
+      method: 'POST',
+      body: JSON.stringify({ email: email.trim().toLowerCase() }),
+    });
+  }
+
+  async recoverAccount(email: string, password: string, otp_code: string): Promise<{
+    status: string;
+    message: string;
+    email: string;
+    account_status: string;
+    recovered_at: string;
+  }> {
+    return this.request<any>('/account/deletion/recover', {
+      method: 'POST',
+      body: JSON.stringify({
+        email: email.trim().toLowerCase(),
+        password,
+        otp_code: otp_code.trim(),
+      }),
+    });
   }
 
   // System & Health
