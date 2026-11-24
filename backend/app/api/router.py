@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from app.api.routes import health, auth, users, preferences, conversations, notifications, chat, social, search, videos, food, shopping, payments, ledger, devices, ai, delivery, instagram
 from app.api.routes import platform  # Phase 24.1: Unified Identity, Media & Blocking
 from app.api.routes import account   # 30-Day Account Deletion & Recovery Lifecycle
+from app.api.routes import legal     # Legal, Privacy Policy & Terms of Service
 
 api_router = APIRouter(prefix="/api/v1")
 
@@ -25,4 +26,5 @@ api_router.include_router(ai.router)
 api_router.include_router(delivery.router)
 api_router.include_router(instagram.router)
 api_router.include_router(platform.router)  # Phase 24.1: /platform/*
+api_router.include_router(legal.router)     # /api/v1/legal/*
 

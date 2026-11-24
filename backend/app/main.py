@@ -169,6 +169,21 @@ app.add_middleware(
 # Include main router
 app.include_router(api_router)
 
+# Root-level Legal & Compliance shortcuts
+from app.api.routes.legal import get_privacy_policy, get_terms_of_service, get_delete_account_portal
+
+@app.get("/privacy", response_class=Response)
+async def root_privacy():
+    return await get_privacy_policy()
+
+@app.get("/terms", response_class=Response)
+async def root_terms():
+    return await get_terms_of_service()
+
+@app.get("/delete-account", response_class=Response)
+async def root_delete_account():
+    return await get_delete_account_portal()
+
 @app.get("/")
 async def root():
     return {
