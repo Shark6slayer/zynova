@@ -28,9 +28,6 @@ const CustomizationStudioView = React.lazy(() => import('../../features/customiz
 const NotificationsCenterView = React.lazy(() => import('../../features/notifications/NotificationsCenterView').then(m => ({ default: m.NotificationsCenterView })));
 const SettingsAccountView = React.lazy(() => import('../../features/settings/SettingsAccountView').then(m => ({ default: m.SettingsAccountView })));
 const SettingsConnectionsView = React.lazy(() => import('../../features/settings/SettingsConnectionsView').then(m => ({ default: m.SettingsConnectionsView })));
-const PrivacyPolicyView = React.lazy(() => import('../../features/public/PrivacyPolicyView').then(m => ({ default: m.PrivacyPolicyView })));
-const TermsOfServiceView = React.lazy(() => import('../../features/public/TermsOfServiceView').then(m => ({ default: m.TermsOfServiceView })));
-const DataDeletionStatusView = React.lazy(() => import('../../features/public/DataDeletionStatusView').then(m => ({ default: m.DataDeletionStatusView })));
 
 export const AppShell: React.FC = () => {
   const { activeModule, setActiveModule, activeTheme, preferences, isMobileNavOpen, setIsMobileNavOpen } = useApp();
@@ -58,29 +55,6 @@ export const AppShell: React.FC = () => {
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [isMobileNavOpen, setIsMobileNavOpen]);
-
-  const pathname = typeof window !== 'undefined' ? window.location.pathname : '';
-  const isPublicStandalone = 
-    pathname === '/privacy-policy' || 
-    pathname === '/privacy' || 
-    pathname === '/terms' || 
-    pathname === '/terms-of-service' || 
-    pathname === '/data-deletion';
-
-  if (isPublicStandalone) {
-    return (
-      <React.Suspense fallback={
-        <div className="flex flex-col items-center justify-center min-h-screen bg-slate-950 text-white space-y-3">
-          <div className="w-8 h-8 border-3 border-purple-500 border-t-transparent rounded-full animate-spin" />
-          <span className="text-xs text-slate-400 font-mono tracking-wider">Loading...</span>
-        </div>
-      }>
-        {(pathname === '/privacy-policy' || pathname === '/privacy') && <PrivacyPolicyView />}
-        {(pathname === '/terms' || pathname === '/terms-of-service') && <TermsOfServiceView />}
-        {pathname === '/data-deletion' && <DataDeletionStatusView />}
-      </React.Suspense>
-    );
-  }
 
   const renderActiveModule = () => {
     switch (activeModule) {
