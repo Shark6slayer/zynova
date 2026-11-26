@@ -207,6 +207,13 @@ async def block_user(
     if actor_id == target_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot block yourself")
 
+    if not ObjectId.is_valid(target_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid target user ID")
+
+    target_user = await db.users.find_one({"_id": ObjectId(target_id)})
+    if not target_user:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Target user not found")
+
     await db.users.update_one(
         {"_id": ObjectId(actor_id)},
         {"$addToSet": {"blocked_users": target_id}}
@@ -241,8 +248,33 @@ async def get_blocked_users(
     db: AsyncIOMotorDatabase,
     user_id: str,
 ) -> List[str]:
-    user = await db.users.find_one({"_id": ObjectId(user_id)}, {"blocked_users": 1})
+    if not user_id:
+        return []
+    user_str = str(user_id)
+    user_obj = ObjectId(user_str) if ObjectId.is_valid(user_str) else None
+    user = await db.users.find_one({"_id": user_obj or user_str}, {"blocked_users": 1})
     return user.get("blocked_users", []) if user else []
+
+
+async def get_all_blocked_user_ids(
+    db: AsyncIOMotorDatabase,
+    user_id: str,
+) -> set[str]:
+    """Returns all user IDs where either this user has blocked the other OR the other has blocked this user."""
+    if not user_id:
+        return set()
+    user_str = str(user_id)
+    user_obj = ObjectId(user_str) if ObjectId.is_valid(user_str) else None
+
+    # 1. Users blocked by this user
+    doc = await db.users.find_one({"_id": user_obj or user_str}, {"blocked_users": 1})
+    blocked_by_user = set(doc.get("blocked_users", [])) if doc else set()
+
+    # 2. Users who have blocked this user
+    cursor = db.users.find({"blocked_users": user_str}, {"_id": 1})
+    blocked_by_others = {str(u["_id"]) async for u in cursor}
+
+    return blocked_by_user.union(blocked_by_others)
 
 
 async def is_blocked(
@@ -251,11 +283,20 @@ async def is_blocked(
     subject_id: str,
 ) -> bool:
     """Returns True if viewer has blocked subject OR subject has blocked viewer."""
-    viewer = await db.users.find_one({"_id": ObjectId(viewer_id)}, {"blocked_users": 1})
-    subject = await db.users.find_one({"_id": ObjectId(subject_id)}, {"blocked_users": 1})
+    if not viewer_id or not subject_id:
+        return False
+    viewer_str = str(viewer_id)
+    subject_str = str(subject_id)
+    if viewer_str == subject_str:
+        return False
+    viewer_obj = ObjectId(viewer_str) if ObjectId.is_valid(viewer_str) else None
+    subject_obj = ObjectId(subject_str) if ObjectId.is_valid(subject_str) else None
+
+    viewer = await db.users.find_one({"_id": viewer_obj or viewer_str}, {"blocked_users": 1})
+    subject = await db.users.find_one({"_id": subject_obj or subject_str}, {"blocked_users": 1})
     viewer_blocks = set(viewer.get("blocked_users", [])) if viewer else set()
     subject_blocks = set(subject.get("blocked_users", [])) if subject else set()
-    return subject_id in viewer_blocks or viewer_id in subject_blocks
+    return subject_str in viewer_blocks or viewer_str in subject_blocks
 
 
 # ---------------------------------------------------------------------------

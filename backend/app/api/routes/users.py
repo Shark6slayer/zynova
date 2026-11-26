@@ -1,3 +1,4 @@
+import asyncio
 from fastapi import APIRouter, HTTPException, status, Depends
 from datetime import datetime, timezone
 from bson import ObjectId
@@ -32,20 +33,45 @@ async def update_my_profile(
         raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
 
     update_fields = {}
+    unset_fields = {}
     if update_in.full_name is not None:
         update_fields["full_name"] = update_in.full_name.strip()
     if update_in.avatar_url is not None:
         update_fields["avatar_url"] = update_in.avatar_url.strip()
     if update_in.bio is not None:
         update_fields["bio"] = update_in.bio.strip()
+    if update_in.phone_number is not None:
+        new_phone = update_in.phone_number.strip()
+        existing_phone = current_user.get("phone_number") or current_user.get("phone")
+        if new_phone != existing_phone:
+            # Store unverified input strictly in pending_phone (non-unique).
+            # NEVER write unverified numbers to phone_number (prevents claiming or blocking).
+            update_fields["pending_phone"] = new_phone
+            # If the user previously had a verified phone and requested a change,
+            # clear the active phone_number and phone using $unset, never phone_number=None,
+            # and reset verification flags.
+            unset_fields["phone_number"] = ""
+            unset_fields["phone"] = ""
+            unset_fields["phone_verified_at"] = ""
+            update_fields["is_phone_verified"] = False
+            update_fields["phone_verified"] = False
+            update_fields["connect_activated"] = False
 
-    if update_fields:
+    if update_fields or unset_fields:
         update_fields["updated_at"] = datetime.now(timezone.utc)
+        mongo_update = {}
+        if update_fields:
+            mongo_update["$set"] = update_fields
+        if unset_fields:
+            mongo_update["$unset"] = unset_fields
+
         await db.users.update_one(
             {"_id": ObjectId(current_user["id"])},
-            {"$set": update_fields}
+            mongo_update
         )
         current_user.update(update_fields)
+        for k in unset_fields:
+            current_user.pop(k, None)
 
     return UserProfileResponse(
         id=current_user["id"],

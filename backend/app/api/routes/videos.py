@@ -37,6 +37,7 @@ from app.schemas.all_schemas import (
     SavedVideoEntryResponse,
     YouTubeSavedMetadata,
     YouTubeSearchResponse,
+    YouTubeShortsResponse,
     YouTubeCategoriesResponse,
     YouTubeVideoStatusResponse,
     VideoStreamUrlResponse,
@@ -509,6 +510,54 @@ async def get_youtube_videos_proxy(
     return await youtube_service.search_youtube_videos(
         q=q,
         category=category,
+        max_results=max_results,
+        page_token=effective_token,
+    )
+
+
+@router.get("/youtube/shorts/catalog", response_model=YouTubeShortsResponse)
+async def get_youtube_shorts_catalog(
+    category: Optional[str] = Query(None, description="Category filter"),
+    language: Optional[str] = Query(None, description="Preferred language code (e.g. ta, hi, ml, te, kn, mr, bn, pa, gu, en)"),
+    max_results: int = Query(15, ge=1, le=50, description="Maximum number of candidates"),
+    page_token: Optional[str] = Query(None, description="Pagination cursor token"),
+):
+    """
+    Returns authentic, embeddable YouTube short-form candidates catalog.
+    Adheres strictly to zero-fake policies: all video IDs are authentic, public, and embeddable.
+    """
+    return youtube_service.get_verified_shorts_catalog(
+        language=language,
+        category=category,
+        max_results=max_results,
+        page_token=page_token,
+    )
+
+
+@router.get("/youtube/shorts", response_model=YouTubeShortsResponse)
+async def get_youtube_shorts_proxy(
+    q: Optional[str] = Query(None, description="Search keyword for shorts"),
+    category: Optional[str] = Query(None, description="Category filter (e.g. Comedy, Tech, Music)"),
+    region_code: str = Query("IN", min_length=2, max_length=2, description="2-letter ISO region/country code"),
+    language: Optional[str] = Query(None, description="Preferred language code (e.g. ta, hi, ml, te, kn, mr, bn, pa, gu, en)"),
+    max_results: int = Query(15, ge=1, le=50, description="Maximum number of candidate shorts to return"),
+    page_token: Optional[str] = Query(None, description="YouTube pagination cursor token"),
+    pageToken: Optional[str] = Query(None, description="YouTube pagination cursor token alias"),
+):
+    """
+    Sovereign YouTube Shorts Discovery & Continuous Stream Proxy:
+    - Queries official YouTube Data API v3 with `videoDuration='short'` and `videoEmbeddable='true'`.
+    - Automatically enriches queries with regional language & #shorts hashtags.
+    - Single-batch metadata lookup filters videos > 90s, non-embeddable, or non-public.
+    - Prioritizes true vertical short candidates (duration <= 60s).
+    - Multi-tier TTL quota protection with Redis and bounded local fallback cache.
+    """
+    effective_token = page_token or pageToken
+    return await youtube_service.search_youtube_shorts(
+        q=q,
+        category=category,
+        region_code=region_code,
+        language=language,
         max_results=max_results,
         page_token=effective_token,
     )

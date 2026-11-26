@@ -1,4 +1,4 @@
-from fastapi import Depends, HTTPException, status
+from fastapi import Depends, HTTPException, status, Request
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from typing import Optional, Dict, Any
 from datetime import datetime, timezone
@@ -58,7 +58,11 @@ async def get_current_user(
 
     user = await db.users.find_one({"_id": ObjectId(user_id)})
     if not user:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Authentication credentials are no longer valid",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
     
     # Block access if account is pending deletion
     if user.get("account_status") == "pending_deletion":
@@ -88,6 +92,25 @@ async def get_current_user(
 
     user["id"] = str(user["_id"])
     return user
+
+async def require_phone_verified(
+    current_user: Dict[str, Any] = Depends(get_current_user)
+) -> Dict[str, Any]:
+    """
+    Dependency that enforces phone verification for Connect communications.
+    Returns 403 Forbidden with {"code": "PHONE_NOT_VERIFIED"} if unverified.
+    """
+    is_verified = (
+        bool(current_user.get("phone_verified"))
+        or bool(current_user.get("is_phone_verified"))
+        or bool(current_user.get("connect_activated"))
+    )
+    if not is_verified:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail={"code": "PHONE_NOT_VERIFIED", "message": "Phone verification required to access Connect."}
+        )
+    return current_user
 
 async def get_optional_current_user(
     credentials: Optional[HTTPAuthorizationCredentials] = Depends(security_bearer)

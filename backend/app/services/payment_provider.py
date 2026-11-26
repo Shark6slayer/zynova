@@ -22,6 +22,14 @@ class PaymentProviderInterface:
 
     async def verify_vpa(self, vpa: str) -> Dict[str, Any]:
         """Resolves VPA/UPI ID or phone number to recipient name."""
+        if self.is_production:
+            return {
+                "is_valid": False,
+                "vpa": vpa.strip().lower(),
+                "recipient_name": None,
+                "provider_verified": False,
+                "reason": "Live NPCI/PSP VPA verification provider is not configured in production."
+            }
         clean_vpa = vpa.strip().lower()
         # Simulated verified name resolution for common handles
         name_map = {
@@ -51,8 +59,16 @@ class PaymentProviderInterface:
     ) -> Dict[str, Any]:
         """
         Processes a payment via the provider contract.
-        Rejects invalid amounts and returns authoritative provider references.
+        Fails closed in production when no live certified provider gateway is configured.
         """
+        if self.is_production:
+            return {
+                "status": "failed",
+                "reason": "Live payment provider / PSP bank partnership is not configured in production.",
+                "provider_name": self.provider_name,
+                "is_test_mode": False,
+            }
+
         if amount_paise <= 0:
             return {"status": "failed", "reason": "Invalid amount"}
 
@@ -67,6 +83,17 @@ class PaymentProviderInterface:
             "provider_name": self.provider_name,
             "is_test_mode": not self.is_production,
             "processed_at": datetime.now(timezone.utc)
+        }
+
+    async def process_refund(self, transaction_ref: str, amount_paise: int) -> Dict[str, Any]:
+        if self.is_production:
+            return {"status": "failed", "reason": "Live refund provider is not configured in production."}
+        if amount_paise <= 0:
+            return {"status": "failed", "reason": "Invalid refund amount"}
+        return {
+            "status": "refunded",
+            "refund_ref": f"RFD{datetime.now(timezone.utc).strftime('%y%m%d%H')}{random.randint(1000, 9999)}",
+            "is_test_mode": True,
         }
 
     async def check_bank_balance(self, bank_name: str, masked_account: str) -> Dict[str, Any]:

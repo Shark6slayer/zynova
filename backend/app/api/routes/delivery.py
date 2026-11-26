@@ -47,13 +47,16 @@ async def get_phone_status(current_user: dict = Depends(get_current_user)):
         raise HTTPException(status_code=503, detail="Database unavailable")
     
     user = await db.users.find_one({"_id": current_user["_id"]})
-    phone = user.get("phone")
-    is_verified = bool(user.get("phone_verified", False))
+    phone = user.get("phone_number") or user.get("phone")
+    # In Connect status response, is_verified MUST strictly reflect phone verification (is_phone_verified),
+    # NEVER email verification (users.is_verified)
+    is_phone_verified = bool(user.get("is_phone_verified", False) or user.get("phone_verified", False))
+    connect_activated = bool(user.get("connect_activated", False) or is_phone_verified)
     return {
         "user_id": current_user["id"],
         "phone": phone,
-        "is_verified": is_verified,
-        "connect_activated": is_verified or bool(phone)
+        "is_verified": is_phone_verified,
+        "connect_activated": connect_activated
     }
 
 @router.post("/phone/send-otp")
@@ -149,17 +152,18 @@ async def verify_phone_otp(
         await db.phone_otps.update_one({"_id": record["_id"]}, {"$inc": {"attempts": 1}})
         raise HTTPException(status_code=400, detail="Invalid verification code")
 
-    # Success: link verified phone to ZENOVA user account
+    # Success: link verified phone to delivery profile only
+    # MUST NEVER set phone_verified, is_phone_verified, or connect_activated (reserved for Firebase-verified Connect)
     await db.users.update_one(
         {"_id": current_user["_id"]},
-        {"$set": {"phone": phone, "phone_verified": True, "phone_verified_at": now}}
+        {"$set": {"delivery_phone": phone, "delivery_phone_verified": True, "delivery_phone_verified_at": now}}
     )
     await db.phone_otps.delete_one({"_id": record["_id"]})
 
     return {
         "status": "verified",
         "phone": phone,
-        "message": "Phone number successfully verified and linked to ZENOVA Connect account"
+        "message": "Phone number successfully verified for delivery services"
     }
 
 # -------------------------------------------------------------

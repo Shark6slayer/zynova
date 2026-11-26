@@ -77,6 +77,30 @@ async def _setup_indexes() -> None:
         # Users indexes
         await db_manager.db.users.create_index("email", unique=True)
         await db_manager.db.users.create_index("username", unique=True)
+        await db_manager.db.users.create_index("phone_number", unique=True, sparse=True)
+
+        # Unique partial index on users.phone_number:
+        # Partial filter {"phone_number": {"$type": "string"}} indexes ONLY string values,
+        # ensuring that multiple documents without a phone_number or with null/unset fields
+        # NEVER trigger DuplicateKeyError, while enforcing uniqueness on verified phone numbers.
+        try:
+            indexes = await db_manager.db.users.index_information()
+            if "phone_number_1" in indexes:
+                existing_idx = indexes["phone_number_1"]
+                # If existing index is not a partial index matching the string type filter, drop it first
+                is_target_partial = existing_idx.get("partialFilterExpression") == {"phone_number": {"$type": "string"}}
+                if not is_target_partial:
+                    logger.info("Dropping legacy phone_number_1 index to upgrade to unique partial filter index...")
+                    await db_manager.db.users.drop_index("phone_number_1")
+        except Exception as drop_err:
+            logger.warning(f"Note on checking/dropping phone_number_1 index: {drop_err}")
+
+        await db_manager.db.users.create_index(
+            "phone_number",
+            unique=True,
+            partialFilterExpression={"phone_number": {"$type": "string"}},
+            name="phone_number_1"
+        )
 
         # User preferences indexes
         await db_manager.db.user_preferences.create_index("user_id", unique=True)

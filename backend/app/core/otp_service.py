@@ -22,6 +22,8 @@ _memory_store: Dict[str, Dict[str, Any]] = {}
 
 EMAIL_VERIFY_PREFIX = "email_verify:"
 EMAIL_VERIFY_CD_PREFIX = "email_verify_cd:"
+PHONE_VERIFY_PREFIX = "phone_verify:"
+PHONE_VERIFY_CD_PREFIX = "phone_verify_cd:"
 PWD_RESET_PREFIX = "pwd_reset:"
 PWD_RESET_CD_PREFIX = "pwd_reset_cd:"
 PWD_RESET_TOKEN_PREFIX = "pwd_reset_token:"
@@ -271,6 +273,67 @@ class OTPService:
         # Invalidate token immediately (Single-use)
         await _delete_store(token_key)
         return True, ""
+
+    @classmethod
+    async def create_phone_verification_otp(cls, phone_number: str) -> Tuple[str, bool, int]:
+        """
+        Creates a 6-digit phone verification OTP for a normalized phone number.
+        Returns (otp_code, is_created, cooldown_remaining_seconds).
+        """
+        clean_phone = phone_number.strip().replace(" ", "").replace("-", "")
+        cd_key = f"{PHONE_VERIFY_CD_PREFIX}{clean_phone}"
+        store_key = f"{PHONE_VERIFY_PREFIX}{clean_phone}"
+
+        # Check resend cooldown
+        cd_item = await _get_store(cd_key)
+        if cd_item:
+            remaining = int(cd_item.get("expires_at", 0) - time.time())
+            return "", False, max(1, remaining)
+
+        code = generate_six_digit_code()
+        hashed = hash_code(code)
+
+        payload = {
+            "otp_hash": hashed,
+            "attempts": 0,
+            "created_at": time.time()
+        }
+
+        await _set_store(store_key, payload, VERIFY_OTP_TTL_SECONDS)
+        await _set_store(cd_key, {"expires_at": time.time() + COOLDOWN_TTL_SECONDS}, COOLDOWN_TTL_SECONDS)
+
+        return code, True, 0
+
+    @classmethod
+    async def verify_phone_otp(cls, phone_number: str, submitted_code: str) -> Tuple[bool, str]:
+        """
+        Verifies the phone verification OTP.
+        Returns (success: bool, error_message: str).
+        """
+        clean_phone = phone_number.strip().replace(" ", "").replace("-", "")
+        store_key = f"{PHONE_VERIFY_PREFIX}{clean_phone}"
+
+        record = await _get_store(store_key)
+        if not record:
+            return False, "Verification code has expired or was not requested. Please request a new code."
+
+        attempts = record.get("attempts", 0)
+        if attempts >= MAX_ATTEMPTS:
+            await _delete_store(store_key)
+            return False, "Maximum verification attempts exceeded. Please request a new code."
+
+        if verify_code_hash(submitted_code, record["otp_hash"]):
+            await _delete_store(store_key)
+            return True, ""
+
+        record["attempts"] = attempts + 1
+        remaining_attempts = MAX_ATTEMPTS - record["attempts"]
+        if remaining_attempts <= 0:
+            await _delete_store(store_key)
+            return False, "Maximum verification attempts exceeded. Please request a new code."
+
+        await _set_store(store_key, record, VERIFY_OTP_TTL_SECONDS)
+        return False, f"Invalid verification code. {remaining_attempts} attempt{'s' if remaining_attempts != 1 else ''} remaining."
 
     @classmethod
     async def clear_cooldown(cls, email: str) -> None:

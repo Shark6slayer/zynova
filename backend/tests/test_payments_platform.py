@@ -1,7 +1,10 @@
+from datetime import datetime, timezone
 import pytest
 from httpx import AsyncClient, ASGITransport
+from bson import ObjectId
 from app.main import app
 from app.database.client import connect_to_database, close_database_connection, get_database
+from app.core.security import create_access_token
 from app.core.rate_limit import (
     auth_rate_limiter,
     payment_rate_limiter,
@@ -17,10 +20,11 @@ async def init_payments_test_db():
     yield
     db = get_database()
     if db is not None:
-        await db.users.delete_many({"username": {"$in": ["pay_user_1", "pay_user_2"]}})
+        await db.users.delete_many({"username": {"$in": ["pay_user_1", "pay_user_2", "upi_test_user"]}})
         await db.bank_accounts.delete_many({"nickname": {"$in": ["Test Salary Account", "User 2 Account"]}})
         await db.rupay_cards.delete_many({"nickname": {"$in": ["HDFC RuPay", "User 2 Card"]}})
         await db.payment_transactions.delete_many({"idempotency_key": {"$in": ["pay_idem_1", "pay_idem_dup"]}})
+        await db.user_upi_ids.delete_many({"vpa": {"$in": ["testuser@oksbi", "testuser2@icici"]}})
     await close_database_connection()
 
 @pytest.mark.asyncio
@@ -31,30 +35,33 @@ async def test_payments_upi_banking_and_rupay_lifecycle():
         if db is not None:
             await db.users.delete_many({"username": {"$in": ["pay_user_1", "pay_user_2"]}})
 
-        # 1. Register User 1 & User 2
-        await client.post("/api/v1/auth/register", json={
+        # 1. Create and authenticate User 1 & User 2
+        now = datetime.now(timezone.utc)
+        u1_id = ObjectId()
+        await db.users.insert_one({
+            "_id": u1_id,
             "email": "pay1@superai.in",
             "username": "pay_user_1",
             "full_name": "Payment User One",
-            "password": "Password123!"
+            "is_active": True,
+            "is_verified": True,
+            "created_at": now,
+            "updated_at": now,
         })
-        login1 = await client.post("/api/v1/auth/login", json={
-            "email": "pay1@superai.in",
-            "password": "Password123!"
-        })
-        h1 = {"Authorization": f"Bearer {login1.json()['access_token']}"}
+        h1 = {"Authorization": f"Bearer {create_access_token({'sub': str(u1_id), 'email': 'pay1@superai.in'})}"}
 
-        await client.post("/api/v1/auth/register", json={
+        u2_id = ObjectId()
+        await db.users.insert_one({
+            "_id": u2_id,
             "email": "pay2@superai.in",
             "username": "pay_user_2",
             "full_name": "Payment User Two",
-            "password": "Password123!"
+            "is_active": True,
+            "is_verified": True,
+            "created_at": now,
+            "updated_at": now,
         })
-        login2 = await client.post("/api/v1/auth/login", json={
-            "email": "pay2@superai.in",
-            "password": "Password123!"
-        })
-        h2 = {"Authorization": f"Bearer {login2.json()['access_token']}"}
+        h2 = {"Authorization": f"Bearer {create_access_token({'sub': str(u2_id), 'email': 'pay2@superai.in'})}"}
 
         # 2. Link Bank Account (Verify masking: never returns full account number)
         bank_res = await client.post("/api/v1/payments/accounts", json={
@@ -164,3 +171,88 @@ async def test_payments_upi_banking_and_rupay_lifecycle():
         assert bill["amount_paise"] > 0
         assert bill["amount_inr"] == round(bill["amount_paise"] / 100, 2)
         assert bill["is_test_fixture"] is True
+
+
+@pytest.mark.asyncio
+async def test_upi_id_management_lifecycle():
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        db = get_database()
+        now = datetime.now(timezone.utc)
+        upi_uid = ObjectId()
+        await db.users.insert_one({
+            "_id": upi_uid,
+            "email": "upi_test@superai.in",
+            "username": "upi_test_user",
+            "full_name": "UPI Test User",
+            "is_active": True,
+            "is_verified": True,
+            "created_at": now,
+            "updated_at": now,
+        })
+        auth_h = {"Authorization": f"Bearer {create_access_token({'sub': str(upi_uid), 'email': 'upi_test@superai.in'})}"}
+
+        # 1. Invalid UPI ID format rejection (strict regex)
+        bad_format = await client.post("/api/v1/payments/upi-ids", json={
+            "vpa": "invalid_upi_format_no_at"
+        }, headers=auth_h)
+        assert bad_format.status_code == 422
+
+        # 2. Add valid UPI ID (first one automatically default)
+        add_res = await client.post("/api/v1/payments/upi-ids", json={
+            "vpa": "testuser@oksbi",
+            "bank_name": "State Bank of India"
+        }, headers=auth_h)
+        assert add_res.status_code == 201
+        upi1 = add_res.json()
+        assert upi1["vpa"] == "testuser@oksbi"
+        assert upi1["handle"] == "oksbi"
+        assert upi1["is_default"] is True
+        assert upi1["verification_status"] == "unverified"
+        assert "not configured" in upi1["provider_notice"]
+        upi1_id = upi1["id"]
+
+        # 3. Duplicate UPI ID rejection (HTTP 409)
+        dup_res = await client.post("/api/v1/payments/upi-ids", json={
+            "vpa": "testuser@oksbi"
+        }, headers=auth_h)
+        assert dup_res.status_code == 409
+
+        # 4. Add second UPI ID
+        add2_res = await client.post("/api/v1/payments/upi-ids", json={
+            "vpa": "testuser2@icici",
+            "bank_name": "ICICI Bank"
+        }, headers=auth_h)
+        assert add2_res.status_code == 201
+        upi2 = add2_res.json()
+        assert upi2["is_default"] is False
+        upi2_id = upi2["id"]
+
+        # 5. List UPI IDs
+        list_res = await client.get("/api/v1/payments/upi-ids", headers=auth_h)
+        assert list_res.status_code == 200
+        assert len(list_res.json()) == 2
+
+        # 6. Verify UPI ID (Fails closed into pending_verification with transparent notice)
+        ver_res = await client.post(f"/api/v1/payments/upi-ids/{upi1_id}/verify", headers=auth_h)
+        assert ver_res.status_code == 200
+        assert ver_res.json()["verification_status"] == "pending_verification"
+        assert "not configured" in ver_res.json()["provider_notice"]
+
+        # 7. Set second UPI ID as default
+        def_res = await client.post(f"/api/v1/payments/upi-ids/{upi2_id}/default", headers=auth_h)
+        assert def_res.status_code == 200
+        assert def_res.json()["is_default"] is True
+
+        # Verify first is no longer default
+        list_after = await client.get("/api/v1/payments/upi-ids", headers=auth_h)
+        for u in list_after.json():
+            if u["id"] == upi1_id:
+                assert u["is_default"] is False
+            elif u["id"] == upi2_id:
+                assert u["is_default"] is True
+
+        # 8. Delete UPI ID
+        del_res = await client.delete(f"/api/v1/payments/upi-ids/{upi1_id}", headers=auth_h)
+        assert del_res.status_code == 200
+        assert del_res.json()["deleted"] is True

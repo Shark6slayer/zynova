@@ -31,6 +31,7 @@ const SettingsConnectionsView = React.lazy(() => import('../../features/settings
 const PrivacyPolicyView = React.lazy(() => import('../../features/public/PrivacyPolicyView').then(m => ({ default: m.PrivacyPolicyView })));
 const TermsOfServiceView = React.lazy(() => import('../../features/public/TermsOfServiceView').then(m => ({ default: m.TermsOfServiceView })));
 const DataDeletionStatusView = React.lazy(() => import('../../features/public/DataDeletionStatusView').then(m => ({ default: m.DataDeletionStatusView })));
+const ChildSafetyStandardsView = React.lazy(() => import('../../features/public/ChildSafetyStandardsView').then(m => ({ default: m.ChildSafetyStandardsView })));
 
 export const AppShell: React.FC = () => {
   const { activeModule, setActiveModule, activeTheme, preferences, isMobileNavOpen, setIsMobileNavOpen } = useApp();
@@ -70,6 +71,9 @@ export const AppShell: React.FC = () => {
     }
     if (pathname === '/data-deletion') {
       return <DataDeletionStatusView />;
+    }
+    if (pathname === '/child-safety' || pathname === '/child-safety-standards') {
+      return <ChildSafetyStandardsView />;
     }
 
     switch (activeModule) {

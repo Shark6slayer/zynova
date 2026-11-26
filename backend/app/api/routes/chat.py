@@ -15,6 +15,9 @@ from datetime import datetime, timezone
 from typing import List, Optional, Dict, Any
 from bson import ObjectId
 import html
+import logging
+
+logger = logging.getLogger(__name__)
 
 from app.schemas.all_schemas import (
     UserPublicSummary,
@@ -40,13 +43,14 @@ from app.schemas.all_schemas import (
     E2EEPrekeyBundleResponse,
     MessageReactionPayload
 )
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_phone_verified
 from app.database.client import get_database
 from app.core.rate_limit import check_chat_user_rate_limit
 from app.core.ws_manager import chat_manager
 from app.core.security import decode_token
 from app.core.crypto_kms import encrypt_field, decrypt_field, is_encrypted
 from app.services import connect_service
+from app.services.identity_service import is_blocked, get_all_blocked_user_ids
 
 router = APIRouter(prefix="/chat", tags=["Zynova Connect Communication Platform"])
 
@@ -62,15 +66,24 @@ def sanitize_text(text: Optional[str]) -> str:
 @router.get("/users/search", response_model=List[UserPublicSummary])
 async def search_users(
     q: str = Query(..., min_length=1, max_length=50),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     db = get_database()
     if db is None:
         return []
 
+    my_id = current_user["id"]
+    blocked_ids = await get_all_blocked_user_ids(db, my_id)
+
+    excluded_ids = [ObjectId(my_id)] if ObjectId.is_valid(my_id) else [my_id]
+    for bid in blocked_ids:
+        if ObjectId.is_valid(bid):
+            excluded_ids.append(ObjectId(bid))
+        excluded_ids.append(bid)
+
     regex_pattern = {"$regex": q, "$options": "i"}
     cursor = db.users.find({
-        "_id": {"$ne": ObjectId(current_user["id"])},
+        "_id": {"$nin": excluded_ids},
         "$or": [{"username": regex_pattern}, {"full_name": regex_pattern}]
     }).limit(15)
 
@@ -85,7 +98,10 @@ async def search_users(
     return results
 
 @router.get("/users/{user_id}/presence")
-async def get_user_presence(user_id: str, current_user: dict = Depends(get_current_user)):
+async def get_user_presence(user_id: str, current_user: dict = Depends(require_phone_verified)):
+    db = get_database()
+    if db is not None and await is_blocked(db, current_user["id"], user_id):
+        return {"status": "offline", "last_seen": None}
     return chat_manager.get_user_status(user_id)
 
 # -------------------------------------------------------------
@@ -95,7 +111,7 @@ async def get_user_presence(user_id: str, current_user: dict = Depends(get_curre
 @router.post("/conversations", response_model=ChatConversationResponse, status_code=status.HTTP_200_OK)
 async def get_or_create_conversation(
     req: ChatConversationCreate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         room = await connect_service.get_or_create_direct_chat(current_user, req.recipient_id)
@@ -122,13 +138,17 @@ async def get_or_create_conversation(
         )
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
-    except (ValueError, PermissionError) as e:
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except ValueError as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
 @router.post("/groups", response_model=ChatConversationResponse, status_code=status.HTTP_201_CREATED)
 async def create_group(
     payload: GroupCreatePayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     room = await connect_service.create_group_chat(
         current_user=current_user,
@@ -162,7 +182,7 @@ async def create_group(
 async def add_member_to_group(
     conversation_id: str,
     payload: GroupMemberActionPayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         return await connect_service.add_group_member(current_user, conversation_id, payload.user_id)
@@ -170,12 +190,14 @@ async def add_member_to_group(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.delete("/groups/{conversation_id}/members/{user_id}", status_code=status.HTTP_200_OK)
 async def remove_member_from_group(
     conversation_id: str,
     user_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         return await connect_service.remove_group_member(current_user, conversation_id, user_id)
@@ -183,12 +205,14 @@ async def remove_member_from_group(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.get("/conversations", response_model=List[ChatConversationResponse])
 async def list_conversations(
     limit: int = Query(50, ge=1, le=100),
     archived: bool = Query(False, description="Filter archived conversations"),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     db = get_database()
     if db is None:
@@ -202,8 +226,14 @@ async def list_conversations(
         query["archived_by"] = {"$ne": current_uid}
 
     cursor = db.chat_rooms.find(query).sort("updated_at", -1).limit(limit)
+    all_blocked = await get_all_blocked_user_ids(db, current_uid)
     results = []
     async for room in cursor:
+        if room.get("type") == "direct":
+            other_p = [p for p in room.get("participants", []) if p != current_uid]
+            if other_p and other_p[0] in all_blocked:
+                continue
+
         unread_for_user = room.get("unread_counts", {}).get(current_uid, 0)
         last_m = room.get("last_message")
         if last_m and isinstance(last_m, dict):
@@ -240,7 +270,7 @@ async def list_conversations(
 async def send_message(
     conversation_id: str,
     msg_in: ChatMessageCreate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     db = get_database()
     if db is None:
@@ -295,6 +325,8 @@ async def send_message(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
     except PermissionError as e:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except Exception as e:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(e))
 
@@ -303,13 +335,23 @@ async def get_conversation_messages(
     conversation_id: str,
     limit: int = Query(40, ge=1, le=100),
     before: Optional[str] = Query(None),
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     db = get_database()
     current_uid = current_user["id"]
-    room = await db.chat_rooms.find_one({"_id": ObjectId(conversation_id), "participants": current_uid})
+    try:
+        conv_obj = ObjectId(conversation_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid conversation ID")
+
+    room = await db.chat_rooms.find_one({"_id": conv_obj, "participants": current_uid})
     if not room:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or unauthorized")
+
+    if room.get("type") == "direct":
+        other_participants = [p for p in room.get("participants", []) if p != current_uid]
+        if other_participants and await is_blocked(db, current_uid, other_participants[0]):
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found or unauthorized")
 
     query: dict = {"conversation_id": conversation_id}
     if before:
@@ -357,7 +399,7 @@ async def get_conversation_messages(
 async def edit_message(
     message_id: str,
     update_in: ChatMessageUpdate,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     db = get_database()
     msg = await db.chat_messages.find_one({"_id": ObjectId(message_id)})
@@ -416,7 +458,7 @@ async def edit_message(
     return response_msg
 
 @router.delete("/messages/{message_id}", response_model=ChatMessageResponse)
-async def delete_message(message_id: str, current_user: dict = Depends(get_current_user)):
+async def delete_message(message_id: str, current_user: dict = Depends(require_phone_verified)):
     db = get_database()
     msg = await db.chat_messages.find_one({"_id": ObjectId(message_id)})
     if not msg:
@@ -467,32 +509,41 @@ async def delete_message(message_id: str, current_user: dict = Depends(get_curre
 async def react_to_msg(
     message_id: str,
     payload: MessageReactionPayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         return await connect_service.react_to_message(current_user, message_id, payload.emoji)
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.post("/conversations/{conversation_id}/messages/{message_id}/pin", status_code=status.HTTP_200_OK)
 async def pin_message(
     conversation_id: str,
     message_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         return await connect_service.toggle_pin_message(current_user, conversation_id, message_id)
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.post("/conversations/{conversation_id}/read", status_code=status.HTTP_200_OK)
 async def mark_conversation_read(
     conversation_id: str,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     db = get_database()
     current_uid = current_user["id"]
-    room = await db.chat_rooms.find_one({"_id": ObjectId(conversation_id), "participants": current_uid})
+    try:
+        conv_obj = ObjectId(conversation_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid conversation ID")
+
+    room = await db.chat_rooms.find_one({"_id": conv_obj, "participants": current_uid})
     if not room:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
 
@@ -512,7 +563,7 @@ async def mark_conversation_read(
     return {"status": "ok", "conversation_id": conversation_id}
 
 @router.get("/unread-count")
-async def get_total_unread_count(current_user: dict = Depends(get_current_user)):
+async def get_total_unread_count(current_user: dict = Depends(require_phone_verified)):
     db = get_database()
     if db is None:
         return {"unread_count": 0}
@@ -532,18 +583,20 @@ async def get_total_unread_count(current_user: dict = Depends(get_current_user))
 async def lock_chat(
     conversation_id: str,
     payload: LockChatPayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         return await connect_service.lock_conversation(current_user, conversation_id, payload.pin)
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.post("/conversations/{conversation_id}/unlock", status_code=status.HTTP_200_OK)
 async def unlock_chat(
     conversation_id: str,
     payload: UnlockChatPayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     try:
         return await connect_service.unlock_conversation(current_user, conversation_id, payload.pin)
@@ -551,13 +604,17 @@ async def unlock_chat(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.post("/conversations/{conversation_id}/archive", status_code=status.HTTP_200_OK)
-async def archive_chat(conversation_id: str, current_user: dict = Depends(get_current_user)):
+async def archive_chat(conversation_id: str, current_user: dict = Depends(require_phone_verified)):
     try:
         return await connect_service.toggle_archive_conversation(current_user, conversation_id)
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 # -------------------------------------------------------------
 # 5. Status Updates (24-Hour Expiration)
@@ -566,7 +623,7 @@ async def archive_chat(conversation_id: str, current_user: dict = Depends(get_cu
 @router.post("/status", response_model=ConnectStatusResponse, status_code=status.HTTP_201_CREATED)
 async def create_status(
     payload: ConnectStatusCreatePayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     doc = await connect_service.post_connect_status(
         current_user=current_user,
@@ -596,7 +653,7 @@ async def create_status(
     )
 
 @router.get("/status/feed", response_model=List[ConnectStatusResponse])
-async def list_statuses(current_user: dict = Depends(get_current_user)):
+async def list_statuses(current_user: dict = Depends(require_phone_verified)):
     statuses = await connect_service.get_connect_status_feed(current_user)
     current_uid = current_user["id"]
     return [
@@ -621,7 +678,7 @@ async def list_statuses(current_user: dict = Depends(get_current_user)):
     ]
 
 @router.post("/status/{status_id}/view", status_code=status.HTTP_200_OK)
-async def view_status(status_id: str, current_user: dict = Depends(get_current_user)):
+async def view_status(status_id: str, current_user: dict = Depends(require_phone_verified)):
     return await connect_service.record_status_view(current_user, status_id)
 
 # -------------------------------------------------------------
@@ -631,7 +688,7 @@ async def view_status(status_id: str, current_user: dict = Depends(get_current_u
 @router.post("/communities", response_model=CommunityResponse, status_code=status.HTTP_201_CREATED)
 async def create_community_route(
     payload: CommunityCreatePayload,
-    current_user: dict = Depends(get_current_user)
+    current_user: dict = Depends(require_phone_verified)
 ):
     comm = await connect_service.create_community(
         current_user=current_user,
@@ -654,7 +711,7 @@ async def create_community_route(
     )
 
 @router.get("/communities", response_model=List[CommunityResponse])
-async def list_communities(current_user: dict = Depends(get_current_user)):
+async def list_communities(current_user: dict = Depends(require_phone_verified)):
     db = get_database()
     current_uid = current_user["id"]
     cursor = db.connect_communities.find({"admin_ids": current_uid}).sort("updated_at", -1)
@@ -679,7 +736,7 @@ async def list_communities(current_user: dict = Depends(get_current_user)):
 # -------------------------------------------------------------
 
 @router.post("/calls/initiate", response_model=CallHistoryResponse, status_code=status.HTTP_201_CREATED)
-async def start_call(payload: CallInitiatePayload, current_user: dict = Depends(get_current_user)):
+async def start_call(payload: CallInitiatePayload, current_user: dict = Depends(require_phone_verified)):
     try:
         call = await connect_service.initiate_call(
             current_user=current_user,
@@ -702,9 +759,11 @@ async def start_call(payload: CallInitiatePayload, current_user: dict = Depends(
         )
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.post("/calls/signal", status_code=status.HTTP_200_OK)
-async def call_signal(payload: CallSignalPayload, current_user: dict = Depends(get_current_user)):
+async def call_signal(payload: CallSignalPayload, current_user: dict = Depends(require_phone_verified)):
     try:
         return await connect_service.handle_call_signal(
             current_user=current_user,
@@ -714,9 +773,11 @@ async def call_signal(payload: CallSignalPayload, current_user: dict = Depends(g
         )
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 @router.get("/calls/history", response_model=List[CallHistoryResponse])
-async def get_call_history(current_user: dict = Depends(get_current_user)):
+async def get_call_history(current_user: dict = Depends(require_phone_verified)):
     db = get_database()
     current_uid = current_user["id"]
     cursor = db.connect_calls.find({"participants": current_uid}).sort("created_at", -1).limit(50)
@@ -742,7 +803,7 @@ async def get_call_history(current_user: dict = Depends(get_current_user)):
 # -------------------------------------------------------------
 
 @router.post("/e2ee/prekeys", status_code=status.HTTP_200_OK)
-async def publish_prekeys(payload: E2EEPrekeyBundlePayload, current_user: dict = Depends(get_current_user)):
+async def publish_prekeys(payload: E2EEPrekeyBundlePayload, current_user: dict = Depends(require_phone_verified)):
     return await connect_service.publish_e2ee_prekey_bundle(
         current_user=current_user,
         identity_key_pub=payload.identity_key_pub,
@@ -757,6 +818,8 @@ async def get_user_prekeys(user_id: str, device_id: Optional[str] = Query(None))
         return await connect_service.fetch_e2ee_prekey_bundle(user_id, device_id)
     except LookupError as e:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=str(e))
+    except PermissionError as e:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=str(e))
 
 # -------------------------------------------------------------
 # 9. Real-time WebSocket Gateway
@@ -775,6 +838,27 @@ async def chat_websocket_endpoint(websocket: WebSocket, token: Optional[str] = Q
 
     user_id = payload.get("sub")
     if not user_id:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    # Security Gate: verify user existence and enforce phone verification before registering connection
+    db = get_database()
+    if db is None:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    user = await db.users.find_one({"_id": ObjectId(user_id)})
+    if not user:
+        await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
+        return
+
+    is_phone_verified = bool(
+        user.get("is_phone_verified")
+        or user.get("phone_verified")
+        or user.get("connect_activated")
+    )
+    if not is_phone_verified:
+        logger.warning(f"[ConnectWS] Rejected connection from unverified phone user: {user_id}")
         await websocket.close(code=status.WS_1008_POLICY_VIOLATION)
         return
 

@@ -20,7 +20,7 @@ from app.database.client import get_database
 from app.core.security import get_password_hash, verify_password
 from app.core.crypto_kms import encrypt_field, decrypt_field, is_encrypted
 from app.core.ws_manager import chat_manager
-from app.services.identity_service import get_blocked_users
+from app.services.identity_service import get_blocked_users, is_blocked, get_all_blocked_user_ids
 
 def sanitize_text(text: Optional[str]) -> str:
     if not text:
@@ -39,9 +39,8 @@ async def get_or_create_direct_chat(current_user: dict, recipient_id: str) -> di
     if current_uid == recipient_uid:
         raise ValueError("Cannot create conversation with yourself")
 
-    # Verify mutual block status
-    blocked = await get_blocked_users(db, current_uid)
-    if recipient_uid in blocked:
+    # Verify mutual block status (bidirectional)
+    if await is_blocked(db, current_uid, recipient_uid):
         raise PermissionError("Cannot message a blocked user")
 
     user_query = {"$or": [{"_id": ObjectId(recipient_uid)}, {"_id": recipient_uid}]} if ObjectId.is_valid(recipient_uid) else {"_id": recipient_uid}
@@ -109,6 +108,10 @@ async def create_group_chat(
 
     # Unique participants including creator
     all_participants = list(set([current_uid] + [p.strip() for p in participant_ids if p.strip()]))
+    for p in participant_ids:
+        if await is_blocked(db, current_uid, p):
+            raise PermissionError("Cannot add a blocked user to a group")
+
     participant_meta = {}
 
     for uid in all_participants:
@@ -159,6 +162,9 @@ async def add_group_member(current_user: dict, conversation_id: str, new_user_id
 
     if current_user["id"] not in room.get("admin_ids", []):
         raise PermissionError("Only admins can add members")
+
+    if await is_blocked(db, current_user["id"], new_user_id):
+        raise PermissionError("Cannot add a blocked user to a group")
 
     new_user = await db.users.find_one({"_id": ObjectId(new_user_id)})
     if not new_user:
@@ -241,10 +247,8 @@ async def send_connect_message(
     # Validate mutual blocks for direct chat
     if room.get("type") == "direct":
         other_participants = [p for p in room["participants"] if p != current_uid]
-        if other_participants:
-            blocked = await get_blocked_users(db, current_uid)
-            if other_participants[0] in blocked:
-                raise PermissionError("Cannot send message to a blocked user")
+        if other_participants and await is_blocked(db, current_uid, other_participants[0]):
+            raise PermissionError("Cannot send message to a blocked user")
 
     now = datetime.now(timezone.utc)
     clean_text = sanitize_text(text) if text else ""
@@ -492,12 +496,12 @@ async def get_connect_status_feed(current_user: dict) -> List[dict]:
     db = get_database()
     current_uid = current_user["id"]
     now = datetime.now(timezone.utc)
-    blocked = await get_blocked_users(db, current_uid)
+    all_blocked = await get_all_blocked_user_ids(db, current_uid)
 
     # Fetch contacts/following users
     user_doc = await db.users.find_one({"_id": ObjectId(current_uid)})
     following = user_doc.get("social_profile", {}).get("following", []) if user_doc else []
-    allowed_authors = set(following + [current_uid]) - set(blocked)
+    allowed_authors = set(following + [current_uid]) - all_blocked
 
     cursor = db.connect_statuses.find({
         "user_id": {"$in": list(allowed_authors)},
@@ -584,6 +588,8 @@ async def initiate_call(current_user: dict, conversation_id: str, call_type: str
         raise LookupError("Conversation not found")
 
     participants = [recipient_id] if recipient_id else [p for p in room["participants"] if p != current_uid]
+    if participants and await is_blocked(db, current_uid, participants[0]):
+        raise PermissionError("Cannot call a blocked user")
     now = datetime.now(timezone.utc)
 
     call_doc = {

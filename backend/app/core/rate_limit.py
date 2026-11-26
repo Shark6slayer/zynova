@@ -233,6 +233,7 @@ food_order_rate_limiter = SharedRateLimiter(namespace="food_order", requests_lim
 shopping_order_rate_limiter = SharedRateLimiter(namespace="shopping_order", requests_limit=10, window_seconds=300, is_sensitive=True)
 payment_rate_limiter = SharedRateLimiter(namespace="payment", requests_limit=15, window_seconds=60, is_sensitive=True)
 balance_enquiry_rate_limiter = SharedRateLimiter(namespace="balance_enquiry", requests_limit=10, window_seconds=60, is_sensitive=True)
+phone_verify_rate_limiter = SharedRateLimiter(namespace="phone_verify", requests_limit=5, window_seconds=3600, is_sensitive=True)
 
 
 # Route dependency wrappers
@@ -289,6 +290,10 @@ def check_payment_rate_limit(user_id: str):
 
 def check_balance_enquiry_rate_limit(user_id: str):
     balance_enquiry_rate_limiter.check(user_id)
+
+async def check_phone_verify_rate_limit(request: Request):
+    client_ip = get_client_ip(request)
+    await phone_verify_rate_limiter.check_async(client_ip)
 
 # Instagram API Rate Limiters: 30 requests per minute per user/IP
 instagram_rate_limiter = SharedRateLimiter(namespace="instagram", requests_limit=30, window_seconds=60, is_sensitive=False)

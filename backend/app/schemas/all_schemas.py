@@ -1,12 +1,28 @@
-from pydantic import BaseModel, EmailStr, Field, field_validator
+from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
+import re
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 
 class UserRegister(BaseModel):
     email: EmailStr
-    username: str = Field(..., min_length=3, max_length=30)
+    username: Optional[str] = Field(None, min_length=3, max_length=30)
     full_name: str = Field(..., min_length=2, max_length=60)
     password: str = Field(..., min_length=8, max_length=128)
+    account_type: Optional[str] = Field("personal", description="Account type: 'personal' or 'professional'")
+    phone_number: Optional[str] = Field(None, max_length=20)
+    dob: Optional[str] = Field(None, max_length=20)
+
+class UsernameAvailabilityResponse(BaseModel):
+    available: bool
+    username: str
+    message: str
+
+class UsernameSuggestionsResponse(BaseModel):
+    suggestions: List[str]
+
+class SetUsernameRequest(BaseModel):
+    email: EmailStr
+    username: str = Field(..., min_length=3, max_length=30)
 
 class UserLogin(BaseModel):
     email: EmailStr
@@ -23,6 +39,27 @@ class UserProfileResponse(BaseModel):
     is_active: bool = True
     is_verified: bool = True
     verified_at: Optional[datetime] = None
+    account_type: Optional[str] = "personal"
+    phone_number: Optional[str] = None
+    is_phone_verified: Optional[bool] = False
+    zen_id: Optional[str] = None
+
+class PhoneEligibilityResponse(BaseModel):
+    phone_number: str
+    eligible: bool
+    existing_types: List[str]
+    available_types: List[str]
+    max_reached: bool
+    account_count: int
+    message: str
+
+class PhoneSendOtpRequest(BaseModel):
+    phone_number: str = Field(..., min_length=10, max_length=20)
+
+class PhoneVerifyOtpRequest(BaseModel):
+    phone_number: str = Field(..., min_length=10, max_length=20)
+    otp_code: str = Field(..., min_length=4, max_length=6)
+    account_type: Optional[str] = "personal"
 
 class TokenResponse(BaseModel):
     access_token: str
@@ -50,6 +87,10 @@ class VerifyResetCodeRequest(BaseModel):
     code: str = Field(..., min_length=6, max_length=6)
     verification_id: Optional[str] = Field(None, min_length=16, max_length=16)
 
+class PhoneVerifyRequest(BaseModel):
+    id_token: str = Field(..., min_length=10, description="Firebase Auth ID Token")
+    phone_number: Optional[str] = Field(None, description="Legacy/ignored request field; phone number is derived strictly from verified token")
+
 class ResetPasswordRequest(BaseModel):
     email: EmailStr
     reset_token: str = Field(..., min_length=10)
@@ -72,6 +113,7 @@ class UserUpdate(BaseModel):
     full_name: Optional[str] = Field(None, min_length=2, max_length=60)
     avatar_url: Optional[str] = Field(None, max_length=500)
     bio: Optional[str] = Field(None, max_length=280)
+    phone_number: Optional[str] = Field(None, max_length=20)
 
 class AccountDeleteRequest(BaseModel):
     password: str = Field(..., min_length=1)
@@ -758,6 +800,37 @@ class YouTubeVideoItem(BaseModel):
     durationSeconds: Optional[int] = None
     viewCount: Optional[int] = None
 
+class YouTubeShortItem(BaseModel):
+    id: str
+    title: str
+    description: str = ""
+    channelTitle: str
+    channelId: Optional[str] = None
+    publishedAt: str = ""
+    thumbnailUrl: str = ""
+    category: str = "Shorts"
+    categoryId: Optional[str] = None
+    duration: Optional[str] = None
+    durationSeconds: Optional[int] = None
+    viewCount: Optional[int] = None
+    is_short_candidate: bool = True
+    aspect_ratio: str = "portrait"
+
+class YouTubeShortsResponse(BaseModel):
+    configured: bool
+    query: str = ""
+    category: Optional[str] = None
+    region_code: str = "IN"
+    language: Optional[str] = None
+    videos: List[YouTubeShortItem] = []
+    next_page_token: Optional[str] = None
+    prev_page_token: Optional[str] = None
+    has_more: bool = False
+    total_results: Optional[int] = None
+    cached: bool = False
+    quota_exceeded: bool = False
+    message: Optional[str] = None
+
 class YouTubeSearchResponse(BaseModel):
     configured: bool
     query: str = ""
@@ -1054,7 +1127,44 @@ class MenuItemUpdatePayload(BaseModel):
 class FoodOrderStatusUpdatePayload(BaseModel):
     status: str = Field(..., pattern="^(confirmed|preparing|out_for_delivery|delivered|cancelled)$")
 
-# UPI, Banking & Bill Payments Schemas (Phase 4J)
+# UPI, Banking & Bill Payments Schemas (Phase 4J & Real UPI Upgrade)
+class UserUPIIdCreate(BaseModel):
+    upi_id: Optional[str] = None
+    vpa: Optional[str] = None
+    bank_name: Optional[str] = Field(None, max_length=100)
+    nickname: Optional[str] = Field(None, max_length=50)
+    is_default: Optional[bool] = False
+
+    @model_validator(mode="before")
+    def validate_and_unify_vpa(cls, data):
+        if isinstance(data, dict):
+            val = data.get("vpa") or data.get("upi_id")
+            if not val or not isinstance(val, str):
+                raise ValueError("UPI ID or VPA is required.")
+            val = val.strip()
+            if not re.match(r"^[a-zA-Z0-9.\-_]{2,256}@[a-zA-Z]{2,64}$", val):
+                raise ValueError("Invalid UPI ID / VPA format. Must match username@bank (e.g. user@oksbi)")
+            data["upi_id"] = val
+            data["vpa"] = val
+        return data
+
+class UserUPIIdResponse(BaseModel):
+    id: str
+    user_id: str
+    upi_id: str
+    vpa: Optional[str] = None
+    handle: Optional[str] = None
+    account_holder_name: Optional[str] = None
+    bank_name: Optional[str] = None
+    nickname: Optional[str] = None
+    is_verified: bool = False
+    verification_status: str = "pending_verification"  # "verified", "pending_verification", "unverified", "failed"
+    is_default: bool = False
+    provider: str = "NPCI_UPI"
+    provider_notice: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
+
 class BankAccountCreate(BaseModel):
     bank_name: str = Field(..., min_length=2, max_length=100)
     ifsc_code: str = Field(..., min_length=11, max_length=11)

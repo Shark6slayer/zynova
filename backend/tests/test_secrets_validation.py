@@ -7,13 +7,16 @@ def test_production_secrets_validation_success():
     """Validates that with valid, distinct, >= 32-char secrets, production config initializes cleanly."""
     valid_jwt = "production_secure_jwt_key_with_at_least_32_characters!"
     valid_otp = "production_secure_otp_hash_key_with_at_least_32_chars!"
+    valid_fb = '{"type": "service_account", "project_id": "test"}'
     cfg = Settings(
         ENVIRONMENT="production",
         JWT_SECRET_KEY=valid_jwt,
-        OTP_HASH_SECRET=valid_otp
+        OTP_HASH_SECRET=valid_otp,
+        FIREBASE_SERVICE_ACCOUNT_JSON=valid_fb
     )
     assert cfg.JWT_SECRET_KEY == valid_jwt
     assert cfg.OTP_HASH_SECRET == valid_otp
+    assert cfg.FIREBASE_SERVICE_ACCOUNT_JSON == valid_fb
 
 
 def test_production_secrets_missing_or_empty():

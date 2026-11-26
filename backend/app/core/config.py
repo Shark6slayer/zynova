@@ -195,6 +195,7 @@ class Settings(BaseSettings):
     INSTAGRAM_WEBHOOK_VERIFY_TOKEN: Optional[str] = None
     WEB_APP_URL: str = "https://www.intellidev.in"
     MOBILE_DEEP_LINK_SCHEME: str = "zenova"
+    FIREBASE_SERVICE_ACCOUNT_JSON: Optional[str] = None
 
     @field_validator("INSTAGRAM_REDIRECT_URI", mode="after")
     @classmethod
@@ -264,6 +265,11 @@ class Settings(BaseSettings):
             # d) Both have the same value
             if jwt_str == otp_str:
                 raise ValueError("In production, JWT_SECRET_KEY and OTP_HASH_SECRET cannot have the same value.")
+
+            # e) FIREBASE_SERVICE_ACCOUNT_JSON required in production
+            fb_json = getattr(self, "FIREBASE_SERVICE_ACCOUNT_JSON", None)
+            if not fb_json or not str(fb_json).strip():
+                raise ValueError("In production, FIREBASE_SERVICE_ACCOUNT_JSON is required and cannot be empty.")
 
         return self
 

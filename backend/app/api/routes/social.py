@@ -30,7 +30,7 @@ from app.schemas.all_schemas import (
 )
 from app.api.deps import get_current_user, get_optional_current_user
 from app.database.client import get_database
-from app.services.identity_service import is_blocked, get_blocked_users
+from app.services.identity_service import is_blocked, get_blocked_users, get_all_blocked_user_ids
 from app.services.social_service import (
     extract_hashtags,
     request_follow_user,
@@ -311,9 +311,27 @@ async def create_post(
 
     check_social_post_rate_limit(current_user["id"])
 
+    from app.services.moderation_service import (
+        check_user_safety_restriction,
+        evaluate_text_content,
+        compute_content_hash,
+        check_duplicate_spam_burst,
+        record_moderation_decision,
+        enqueue_media_moderation,
+    )
+    restr_msg = await check_user_safety_restriction(db, current_user["id"], "post")
+    if restr_msg:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=restr_msg)
+
     clean_content = sanitize_text(post_in.content)
     if not clean_content:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Post content cannot be empty")
+
+    if await check_duplicate_spam_burst(db, current_user["id"], compute_content_hash(clean_content)):
+        raise HTTPException(status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Duplicate spam burst detected. Please wait before posting identical content.")
+
+    mod_eval = evaluate_text_content(clean_content, context="post")
+    mod_status = "quarantined" if mod_eval["decision"] in {"ESCALATE", "RESTRICT"} else "active"
 
     now = datetime.now(timezone.utc)
     # If media_url is provided, prioritize it, otherwise fall back to image_url
@@ -333,12 +351,19 @@ async def create_post(
         "likes_count": 0,
         "comments_count": 0,
         "is_edited": False,
+        "moderation_status": mod_status,
+        "moderation_score": mod_eval["severity_score"],
         "created_at": now,
         "updated_at": now
     }
 
     res = await db.posts.insert_one(post_doc)
     post_id = str(res.inserted_id)
+
+    if mod_eval["decision"] != "ALLOW":
+        await record_moderation_decision(db, "post", post_id, current_user["id"], mod_eval, reason="automated_text_policy_screening")
+    if media_url:
+        await enqueue_media_moderation(db, "reel" if media_type == "video" else "post", post_id, current_user["id"], media_type, caption=clean_content)
 
     return PostResponse(
         id=post_id,
@@ -447,6 +472,93 @@ async def delete_post(
 
     return {"status": "deleted", "post_id": post_id}
 
+# 8b. Archive Post
+@router.post("/posts/{post_id}/archive", status_code=status.HTTP_200_OK)
+async def archive_post(
+    post_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    try:
+        post_obj = ObjectId(post_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid post ID")
+
+    post = await db.posts.find_one({"_id": post_obj})
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    if post["author_id"] != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot archive another user's post")
+
+    await db.posts.update_one({"_id": post_obj}, {"$set": {"is_archived": True, "archived_at": datetime.now(timezone.utc)}})
+    return {"status": "archived", "post_id": post_id}
+
+# 8c. Unarchive Post
+@router.post("/posts/{post_id}/unarchive", status_code=status.HTTP_200_OK)
+async def unarchive_post(
+    post_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+
+    try:
+        post_obj = ObjectId(post_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid post ID")
+
+    post = await db.posts.find_one({"_id": post_obj})
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    if post["author_id"] != current_user["id"]:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot unarchive another user's post")
+
+    await db.posts.update_one({"_id": post_obj}, {"$set": {"is_archived": False}, "$unset": {"archived_at": ""}})
+    return {"status": "unarchived", "post_id": post_id}
+
+# 8d. Get Archived Posts
+@router.get("/posts/archived", response_model=List[PostResponse])
+async def get_archived_posts(
+    current_user: dict = Depends(get_current_user)
+):
+    db = get_database()
+    if db is None:
+        return []
+
+    my_id = current_user["id"]
+    cursor = db.posts.find({"author_id": my_id, "is_archived": True}).sort("created_at", -1)
+    posts = []
+    async for p in cursor:
+        likes_list = p.get("likes", [])
+        posts.append(PostResponse(
+            id=str(p["_id"]),
+            author_id=p["author_id"],
+            author_username=p["author_username"],
+            author_full_name=p["author_full_name"],
+            author_avatar=p.get("author_avatar"),
+            content=p["content"],
+            image_url=p.get("image_url"),
+            media_url=p.get("media_url"),
+            media_type=p.get("media_type", "image"),
+            media_assets=p.get("media_assets", []),
+            tags=p.get("tags", []),
+            location=p.get("location"),
+            created_at=p["created_at"],
+            updated_at=p.get("updated_at", p["created_at"]),
+            is_edited=p.get("is_edited", False),
+            likes_count=len(likes_list),
+            comments_count=p.get("comments_count", 0),
+            is_liked=(my_id in likes_list),
+            is_owner=True
+        ))
+    return posts
+
 # 9. Get Feed (Global Discovery, Following, or Reels)
 @router.get("/feed", response_model=List[PostResponse])
 async def get_feed(
@@ -464,9 +576,9 @@ async def get_feed(
 
     # Mutual blocking isolation: hide posts from blocked/blocking users
     if my_id:
-        blocked_ids = await get_blocked_users(db, my_id)
+        blocked_ids = await get_all_blocked_user_ids(db, my_id)
         if blocked_ids:
-            query["author_id"] = {"$nin": blocked_ids}
+            query["author_id"] = {"$nin": list(blocked_ids)}
 
     if mode == "following":
         if not my_id:
@@ -490,8 +602,10 @@ async def get_feed(
         except Exception:
             pass
 
-    # Exclude posts from accounts pending deletion or inactive
+    # Exclude posts from accounts pending deletion or inactive, archived, or moderated/quarantined posts
     query["account_status"] = {"$ne": "pending_deletion"}
+    query["is_archived"] = {"$ne": True}
+    query["moderation_status"] = {"$nin": ["removed", "restricted", "quarantined"]}
     cursor = db.posts.find(query).sort("created_at", -1).limit(limit)
     posts = []
     async for p in cursor:
@@ -550,8 +664,10 @@ async def get_user_posts(
         query["media_type"] = media_filter
         query["media_url"] = {"$ne": None}
 
-    # Exclude posts from accounts pending deletion or inactive
+    # Exclude posts from accounts pending deletion or inactive, archived, or moderated/quarantined posts
     query["account_status"] = {"$ne": "pending_deletion"}
+    query["is_archived"] = {"$ne": True}
+    query["moderation_status"] = {"$nin": ["removed", "restricted", "quarantined"]}
     cursor = db.posts.find(query).sort("created_at", -1).limit(limit)
 
     posts = []
@@ -597,14 +713,19 @@ async def like_post(
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid post ID")
 
     my_id = current_user["id"]
+    post = await db.posts.find_one({"_id": post_obj})
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
+    # Mutual block check: cannot interact with posts from blocked/blocking users
+    if await is_blocked(db, my_id, post["author_id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
     # Atomic $addToSet prevents duplicate likes
     res = await db.posts.update_one(
         {"_id": post_obj},
         {"$addToSet": {"likes": my_id}}
     )
-
-    if res.matched_count == 0:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
     post = await db.posts.find_one({"_id": post_obj})
     likes_count = len(post.get("likes", []))
@@ -680,6 +801,10 @@ async def create_comment(
     if not post:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
 
+    # Mutual block check: cannot comment on post if viewer has blocked author OR author has blocked viewer
+    if await is_blocked(db, current_user["id"], post["author_id"]):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
     clean_content = sanitize_text(comment_in.content)
     now = datetime.now(timezone.utc)
 
@@ -737,8 +862,25 @@ async def list_comments(
     if db is None:
         return []
 
+    try:
+        post_obj = ObjectId(post_id)
+    except Exception:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid post ID")
+
+    post = await db.posts.find_one({"_id": post_obj})
+    if not post:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Post not found")
+
     my_id = current_user["id"]
-    cursor = db.post_comments.find({"post_id": post_id}).sort("created_at", 1).limit(limit)
+    if await is_blocked(db, my_id, post["author_id"]):
+        return []
+
+    blocked_uids = await get_all_blocked_user_ids(db, my_id)
+    query: dict = {"post_id": post_id}
+    if blocked_uids:
+        query["author_id"] = {"$nin": list(blocked_uids)}
+
+    cursor = db.post_comments.find(query).sort("created_at", 1).limit(limit)
 
     comments = []
     async for c in cursor:
@@ -1230,3 +1372,310 @@ async def review_verification(
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Admin authorization required to review verification applications")
 
     return await review_verification_application(db, app_id, current_user["id"], action, notes)
+
+
+# --------------------------------------------------------------------------
+# 30. ZenoSocial Direct Messaging (Zen_ID Identity & 3-Message Non-Mutual Limit)
+# --------------------------------------------------------------------------
+from pydantic import BaseModel as _SocialBaseModel
+from pymongo import ReturnDocument
+
+NON_MUTUAL_MESSAGE_LIMIT = 3
+
+
+class SocialSendMessageRequest(_SocialBaseModel):
+    recipient_zen_id: str
+    text: str
+    reply_to_message_id: Optional[str] = None
+
+
+class SocialShareContentRequest(_SocialBaseModel):
+    recipient_zen_ids: List[str]
+    content_type: str
+    content_id: str
+    message: Optional[str] = None
+
+
+async def _is_mutual_follow(db, user_a_id: str, user_b_id: str) -> bool:
+    a_to_b = await db.follows.find_one({"follower_id": user_a_id, "following_id": user_b_id}, {"_id": 1})
+    if not a_to_b:
+        return False
+    b_to_a = await db.follows.find_one({"follower_id": user_b_id, "following_id": user_a_id}, {"_id": 1})
+    return b_to_a is not None
+
+
+async def _resolve_user_by_zen_id(db, zen_id: str) -> Optional[dict]:
+    clean = zen_id.strip().lstrip("@").lower()
+    if clean.startswith("zen_"):
+        clean = clean[4:]
+    return await db.users.find_one(
+        {"$or": [{"zen_id": clean}, {"username": clean}, {"zen_id": f"zen_{clean}"}]},
+        {"_id": 1, "username": 1, "zen_id": 1, "full_name": 1, "avatar_url": 1, "is_verified": 1},
+    )
+
+
+async def _dispatch_social_message(
+    db,
+    sender: dict,
+    recipient: dict,
+    text: str,
+    shared_content: Optional[dict] = None,
+) -> dict:
+    sender_id = sender["id"]
+    recipient_id = str(recipient["_id"])
+    if sender_id == recipient_id:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot message yourself")
+
+    if await is_blocked(db, sender_id, recipient_id):
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="Cannot message a blocked user")
+
+    from app.services.moderation_service import (
+        check_user_safety_restriction,
+        evaluate_text_content,
+        record_moderation_decision,
+    )
+    restr_msg = await check_user_safety_restriction(db, sender_id, "message")
+    if restr_msg:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=restr_msg)
+
+    msg_eval = evaluate_text_content(text, context="social_message")
+    if msg_eval["decision"] in {"ESCALATE", "RESTRICT"}:
+        await record_moderation_decision(db, "social_message", f"{sender_id}_{recipient_id}", sender_id, msg_eval, reason="social_message_safety_block")
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Message blocked by safety policy (malicious link or abusive content detected).")
+
+    is_mutual = await _is_mutual_follow(db, sender_id, recipient_id)
+    now = datetime.now(timezone.utc)
+    p_ids = sorted([sender_id, recipient_id])
+    p_key = "_".join(p_ids)
+
+    sender_zen = sender.get("zen_id") or sender.get("username")
+    recipient_zen = recipient.get("zen_id") or recipient.get("username")
+
+    # Ensure unique index on participant_key and upsert atomically
+    try:
+        await db.social_conversations.create_index("participant_key", unique=True)
+    except Exception:
+        pass
+    try:
+        await db.social_conversations.update_one(
+            {"participant_key": p_key},
+            {
+                "$setOnInsert": {
+                    "participant_key": p_key,
+                    "participant_ids": p_ids,
+                    "participant_zen_ids": [sender_zen, recipient_zen],
+                    "sent_counts": {sender_id: 0, recipient_id: 0},
+                    "created_at": now,
+                    "updated_at": now,
+                }
+            },
+            upsert=True,
+        )
+    except DuplicateKeyError:
+        pass
+
+    if is_mutual:
+        conv = await db.social_conversations.find_one_and_update(
+            {"participant_key": p_key},
+            {"$inc": {f"sent_counts.{sender_id}": 1}, "$set": {"updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+    else:
+        # Atomic compare-and-increment enforcing strict 3-message cap under concurrency
+        conv = await db.social_conversations.find_one_and_update(
+            {
+                "participant_key": p_key,
+                "$or": [
+                    {f"sent_counts.{sender_id}": {"$lt": NON_MUTUAL_MESSAGE_LIMIT}},
+                    {f"sent_counts.{sender_id}": {"$exists": False}},
+                ],
+            },
+            {"$inc": {f"sent_counts.{sender_id}": 1}, "$set": {"updated_at": now}},
+            return_document=ReturnDocument.AFTER,
+        )
+        if conv is None:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="Message limit reached (3/3). Recipient must follow you back to continue messaging.",
+            )
+
+    conv_id = str(conv["_id"])
+    msg_doc = {
+        "conversation_id": conv_id,
+        "sender_id": sender_id,
+        "sender_zen_id": sender_zen,
+        "recipient_id": recipient_id,
+        "recipient_zen_id": recipient_zen,
+        "text": sanitize_text(text),
+        "shared_content": shared_content,
+        "status": "sent",
+        "created_at": now,
+    }
+    res = await db.social_messages.insert_one(msg_doc)
+    msg_id = str(res.inserted_id)
+
+    await db.social_conversations.update_one(
+        {"_id": conv["_id"]},
+        {
+            "$set": {
+                "last_message": {
+                    "id": msg_id,
+                    "sender_id": sender_id,
+                    "sender_zen_id": sender_zen,
+                    "text": msg_doc["text"],
+                    "created_at": now,
+                },
+                "updated_at": now,
+            }
+        },
+    )
+
+    return {
+        "id": msg_id,
+        "conversation_id": conv_id,
+        "sender_id": sender_id,
+        "sender_zen_id": sender_zen,
+        "recipient_id": recipient_id,
+        "recipient_zen_id": recipient_zen,
+        "text": msg_doc["text"],
+        "shared_content": shared_content,
+        "status": "sent",
+        "created_at": now.isoformat(),
+    }
+
+
+@router.get("/messages/conversations")
+async def list_social_conversations(
+    limit: int = Query(20, ge=1, le=50),
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_database()
+    if db is None:
+        return []
+    my_id = current_user["id"]
+    blocked_ids = await get_all_blocked_user_ids(db, my_id)
+    cursor = db.social_conversations.find({"participant_ids": my_id}).sort("updated_at", -1).limit(limit)
+    results = []
+    async for conv in cursor:
+        others = [p for p in conv.get("participant_ids", []) if p != my_id]
+        if not others or others[0] in blocked_ids:
+            continue
+        other_id = others[0]
+        other_doc = await db.users.find_one({"_id": ObjectId(other_id)}, {"username": 1, "zen_id": 1, "full_name": 1, "avatar_url": 1, "is_verified": 1})
+        if not other_doc:
+            continue
+        is_mutual = await _is_mutual_follow(db, my_id, other_id)
+        sent_by_me = conv.get("sent_counts", {}).get(my_id, 0)
+        remaining = max(0, NON_MUTUAL_MESSAGE_LIMIT - sent_by_me) if not is_mutual else 999999
+        results.append({
+            "id": str(conv["_id"]),
+            "participant_ids": conv.get("participant_ids", []),
+            "participant_zen_ids": conv.get("participant_zen_ids", []),
+            "other_participant": {
+                "id": other_id,
+                "username": other_doc.get("zen_id") or other_doc.get("username"),
+                "full_name": other_doc.get("full_name", ""),
+                "avatar_url": other_doc.get("avatar_url"),
+                "is_verified": other_doc.get("is_verified", False),
+            },
+            "is_mutual_follow": is_mutual,
+            "messages_sent_by_me": sent_by_me,
+            "remaining_messages_allowed": remaining,
+            "can_send_message": is_mutual or sent_by_me < NON_MUTUAL_MESSAGE_LIMIT,
+            "last_message": conv.get("last_message"),
+            "unread_count": 0,
+            "updated_at": conv.get("updated_at").isoformat() if conv.get("updated_at") else "",
+        })
+    return results
+
+
+@router.get("/messages/conversations/{conv_id}/messages")
+async def get_social_messages(
+    conv_id: str,
+    limit: int = Query(50, ge=1, le=100),
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+    if not ObjectId.is_valid(conv_id):
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid conversation ID")
+    conv = await db.social_conversations.find_one({"_id": ObjectId(conv_id)})
+    my_id = current_user["id"]
+    if not conv or my_id not in conv.get("participant_ids", []):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    others = [p for p in conv.get("participant_ids", []) if p != my_id]
+    other_id = others[0] if others else my_id
+    if await is_blocked(db, my_id, other_id):
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Conversation not found")
+
+    is_mutual = await _is_mutual_follow(db, my_id, other_id)
+    sent_by_me = conv.get("sent_counts", {}).get(my_id, 0)
+    remaining = max(0, NON_MUTUAL_MESSAGE_LIMIT - sent_by_me) if not is_mutual else 999999
+
+    cursor = db.social_messages.find({"conversation_id": conv_id}).sort("created_at", 1).limit(limit)
+    messages = []
+    async for m in cursor:
+        messages.append({
+            "id": str(m["_id"]),
+            "conversation_id": conv_id,
+            "sender_id": m["sender_id"],
+            "sender_zen_id": m["sender_zen_id"],
+            "recipient_id": m["recipient_id"],
+            "recipient_zen_id": m["recipient_zen_id"],
+            "text": m["text"],
+            "shared_content": m.get("shared_content"),
+            "status": m.get("status", "sent"),
+            "created_at": m["created_at"].isoformat(),
+        })
+
+    return {
+        "conversation_id": conv_id,
+        "is_mutual_follow": is_mutual,
+        "messages_sent_by_me": sent_by_me,
+        "remaining_messages_allowed": remaining,
+        "can_send_message": is_mutual or sent_by_me < NON_MUTUAL_MESSAGE_LIMIT,
+        "non_mutual_limit": NON_MUTUAL_MESSAGE_LIMIT,
+        "messages": messages,
+    }
+
+
+@router.post("/messages/send", status_code=status.HTTP_201_CREATED)
+async def send_social_message(
+    body: SocialSendMessageRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+    recipient = await _resolve_user_by_zen_id(db, body.recipient_zen_id)
+    if not recipient:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Recipient Zen_ID not found")
+    return await _dispatch_social_message(db, current_user, recipient, body.text)
+
+
+@router.post("/messages/share-content", status_code=status.HTTP_201_CREATED)
+async def share_social_content(
+    body: SocialShareContentRequest,
+    current_user: dict = Depends(get_current_user),
+):
+    db = get_database()
+    if db is None:
+        raise HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail="Database unavailable")
+    shared_meta = {
+        "type": body.content_type,
+        "content_id": body.content_id,
+        "creator_zen_id": current_user.get("zen_id") or current_user.get("username"),
+        "caption_snippet": (body.message or f"Shared {body.content_type}")[:120],
+    }
+    sent_messages = []
+    for r_zen in body.recipient_zen_ids:
+        recipient = await _resolve_user_by_zen_id(db, r_zen)
+        if not recipient:
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Recipient {r_zen} not found")
+        msg = await _dispatch_social_message(
+            db, current_user, recipient, body.message or f"Shared a {body.content_type}", shared_content=shared_meta
+        )
+        sent_messages.append(msg)
+    return sent_messages
