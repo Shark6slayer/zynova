@@ -1,37 +1,20 @@
 import React from 'react';
-import { ShieldAlert, ArrowLeft, Mail, AlertTriangle, FileCheck, CheckCircle2 } from 'lucide-react';
+import { ShieldAlert, Mail, AlertTriangle, FileCheck, CheckCircle2 } from 'lucide-react';
+import { LegalPageLayout } from './LegalPageLayout';
 
 export const ChildSafetyStandardsView: React.FC = () => {
   return (
-    <div className="min-h-screen bg-slate-950 text-white p-6 md:p-12 max-w-4xl mx-auto space-y-8 font-sans">
-      {/* Header */}
-      <div className="flex items-center justify-between border-b border-white/10 pb-6">
-        <div>
-          <a
-            href="/"
-            className="inline-flex items-center gap-2 text-xs text-purple-400 hover:text-purple-300 font-semibold mb-2 transition"
-          >
-            <ArrowLeft className="w-3.5 h-3.5" />
-            <span>Back to Zynova</span>
-          </a>
-          <h1 className="text-3xl font-extrabold tracking-tight">Child Safety Standards</h1>
-          <p className="text-xs text-slate-400 mt-1">
-            <strong>Effective Date:</strong> November 26, 2026 &bull; <strong>Website:</strong>{' '}
-            <a href="https://www.intellidev.in" target="_blank" rel="noreferrer" className="text-purple-400 underline">
-              https://www.intellidev.in
-            </a>
-          </p>
-        </div>
-        <div className="p-3 bg-red-500/10 border border-red-500/20 rounded-2xl text-red-400">
-          <ShieldAlert className="w-6 h-6" />
-        </div>
-      </div>
-
+    <LegalPageLayout
+      title="Child Safety Standards"
+      description="ZENOVA Child Safety Standards and zero-tolerance policy against Child Sexual Abuse and Exploitation (CSAE) and CSAM."
+      canonicalPath="/child-safety"
+      subtitle="Effective Date: November 26, 2026 • Website: https://www.intellidev.in"
+      icon={<ShieldAlert className="w-6 h-6" />}
+      iconBgClass="bg-red-500/10 border-red-500/20 text-red-400"
+    >
       {/* 1. Our Commitment */}
       <section className="space-y-3">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2">
-          <span>1. Our Commitment</span>
-        </h2>
+        <h2 className="text-lg font-bold text-white">1. Our Commitment</h2>
         <p className="text-sm text-slate-300 leading-relaxed">
           ZENOVA is committed to protecting children and preventing Child Sexual Abuse and Exploitation (CSAE) across its services.
         </p>
@@ -42,7 +25,7 @@ export const ChildSafetyStandardsView: React.FC = () => {
 
       {/* 2. Strictly Prohibited Activities */}
       <section className="space-y-4 p-6 rounded-3xl bg-slate-900/80 border border-red-500/30">
-        <h2 className="text-lg font-bold text-white flex items-center gap-2 text-red-400">
+        <h2 className="text-lg font-bold text-red-400 flex items-center gap-2">
           <AlertTriangle className="w-5 h-5 text-red-400" />
           <span>2. Strictly Prohibited Activities</span>
         </h2>
@@ -89,7 +72,12 @@ export const ChildSafetyStandardsView: React.FC = () => {
           </p>
           <p className="text-sm text-purple-300 font-mono flex items-center gap-2">
             <Mail className="w-4 h-4 text-purple-400" />
-            <span>Child Safety Email: <strong>child-safety@intellidev.in</strong></span>
+            <span>
+              Child Safety Email:{' '}
+              <a href="mailto:child-safety@intellidev.in" className="font-bold underline">
+                child-safety@intellidev.in
+              </a>
+            </span>
           </p>
           <p className="text-xs text-slate-400">
             Reports involving suspected child exploitation will be prioritized for immediate review.
@@ -145,7 +133,10 @@ export const ChildSafetyStandardsView: React.FC = () => {
             <strong>Designated Contact:</strong> ZENOVA Child Safety &amp; Trust Team
           </p>
           <p className="text-xs text-slate-300">
-            <strong>Email:</strong> <a href="mailto:child-safety@intellidev.in" className="text-purple-400 underline">child-safety@intellidev.in</a>
+            <strong>Email:</strong>{' '}
+            <a href="mailto:child-safety@intellidev.in" className="text-purple-400 underline">
+              child-safety@intellidev.in
+            </a>
           </p>
           <p className="text-xs text-slate-400 mt-2">
             The designated representative is responsible for coordinating policy enforcement, reviewing incoming reports, liaising with regulatory bodies, and facilitating prompt safety actions.
@@ -164,27 +155,13 @@ export const ChildSafetyStandardsView: React.FC = () => {
         </p>
       </section>
 
-      {/* 8. Policy Updates & Links */}
-      <section className="space-y-3 border-t border-white/10 pt-6">
-        <h2 className="text-lg font-bold text-white">8. Policy Updates &amp; Public URLs</h2>
+      {/* 8. Policy Updates */}
+      <section className="space-y-3">
+        <h2 className="text-lg font-bold text-white">8. Policy Updates</h2>
         <p className="text-sm text-slate-300 leading-relaxed">
           These standards may be updated as ZENOVA&apos;s services, safety systems, and applicable legal requirements evolve.
         </p>
-        <div className="text-xs text-slate-400 space-y-1">
-          <p>
-            <strong>Official Website:</strong>{' '}
-            <a href="https://www.intellidev.in" target="_blank" rel="noreferrer" className="text-purple-400 underline">
-              https://www.intellidev.in
-            </a>
-          </p>
-          <p>
-            <strong>Child Safety Standards:</strong>{' '}
-            <a href="https://www.intellidev.in/child-safety" target="_blank" rel="noreferrer" className="text-purple-400 underline">
-              https://www.intellidev.in/child-safety
-            </a>
-          </p>
-        </div>
       </section>
-    </div>
+    </LegalPageLayout>
   );
 };

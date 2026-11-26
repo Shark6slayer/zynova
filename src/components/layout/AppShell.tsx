@@ -28,10 +28,6 @@ const CustomizationStudioView = React.lazy(() => import('../../features/customiz
 const NotificationsCenterView = React.lazy(() => import('../../features/notifications/NotificationsCenterView').then(m => ({ default: m.NotificationsCenterView })));
 const SettingsAccountView = React.lazy(() => import('../../features/settings/SettingsAccountView').then(m => ({ default: m.SettingsAccountView })));
 const SettingsConnectionsView = React.lazy(() => import('../../features/settings/SettingsConnectionsView').then(m => ({ default: m.SettingsConnectionsView })));
-const PrivacyPolicyView = React.lazy(() => import('../../features/public/PrivacyPolicyView').then(m => ({ default: m.PrivacyPolicyView })));
-const TermsOfServiceView = React.lazy(() => import('../../features/public/TermsOfServiceView').then(m => ({ default: m.TermsOfServiceView })));
-const DataDeletionStatusView = React.lazy(() => import('../../features/public/DataDeletionStatusView').then(m => ({ default: m.DataDeletionStatusView })));
-const ChildSafetyStandardsView = React.lazy(() => import('../../features/public/ChildSafetyStandardsView').then(m => ({ default: m.ChildSafetyStandardsView })));
 
 export const AppShell: React.FC = () => {
   const { activeModule, setActiveModule, activeTheme, preferences, isMobileNavOpen, setIsMobileNavOpen } = useApp();
@@ -61,21 +57,6 @@ export const AppShell: React.FC = () => {
   }, [isMobileNavOpen, setIsMobileNavOpen]);
 
   const renderActiveModule = () => {
-    // Check path for public standalone pages without login
-    const pathname = window.location.pathname;
-    if (pathname === '/privacy-policy' || pathname === '/privacy') {
-      return <PrivacyPolicyView />;
-    }
-    if (pathname === '/terms' || pathname === '/terms-of-service') {
-      return <TermsOfServiceView />;
-    }
-    if (pathname === '/data-deletion') {
-      return <DataDeletionStatusView />;
-    }
-    if (pathname === '/child-safety' || pathname === '/child-safety-standards') {
-      return <ChildSafetyStandardsView />;
-    }
-
     switch (activeModule) {
       case 'home':
         return <HomeDashboardView />;

@@ -6,7 +6,7 @@
       "destination": "https://api.zenova.intellidev.in/api/v1/:path*"
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!assets/|favicon\\.svg$|icons\\.svg$|robots\\.txt$|sitemap\\.xml$).*)",
       "destination": "/index.html"
     }
   ],
